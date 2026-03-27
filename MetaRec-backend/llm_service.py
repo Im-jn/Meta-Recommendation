@@ -193,7 +193,7 @@ def get_stream_system_prompt(language: str = "en") -> str:
 
 
 async def analyze_user_message(
-    client: Union[AsyncOpenAi, AsyncAzureOpenAI],
+    client: Union[AsyncOpenAI, AsyncAzureOpenAI],
     message: str,
     conversation_history: Optional[list] = None,
     user_profile: Optional[Dict[str, Any]] = None,
