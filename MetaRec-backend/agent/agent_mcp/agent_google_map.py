@@ -31,7 +31,8 @@ logger.setLevel(logging.INFO)
 SERPAPI_URL = os.getenv("SERPAPI_URL", "https://serpapi.com/search.json")
 SERPAPI_KEY = os.getenv("SERPAPI_KEY")
 if not SERPAPI_KEY:
-    raise ValueError("SERPAPI_KEY environment variable is not set. Please set it in your .env file.")
+    #raise ValueError("SERPAPI_KEY environment variable is not set. Please set it in your .env file.")
+    logger.warn("SERPAPI_KEY environment variable is not set. Please set it in your .env file.")
 
 # ==========================================函数定义==========================================
 
