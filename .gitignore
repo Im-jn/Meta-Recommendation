@@ -12,6 +12,7 @@ __pycache__/
 *.pyd
 .env
 venv/
+.venv/
 
 # IDE
 .DS_Store
@@ -21,6 +22,7 @@ venv/
 # Backend runtime data
 MetaRec-backend/conversations/
 MetaRec-backend/user_profiles/
+/MetaRec-backend/debug_traces/
 
 # Log files and runtime data
 MetaRec-backend/agent/agent_log/

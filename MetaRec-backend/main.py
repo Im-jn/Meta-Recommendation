@@ -38,6 +38,7 @@ logging.getLogger("uvicorn.access").setLevel(logging.INFO)
 # 导入核心服务
 from service import MetaRecService
 from conversation_storage import get_storage
+from internal.debug.router import create_debug_router
 
 # 导入 LLM 服务
 try:

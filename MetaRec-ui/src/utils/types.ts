@@ -107,4 +107,62 @@ export type Conversation = {
   messages: ConversationMessage[]
 }
 
+// ==================== Internal Debug/Testbench Types ====================
 
+export type DebugConfig = {
+  enabled: boolean
+  llm_explain_enabled: boolean
+  auth_mode: string
+  cookie_name: string
+}
+
+export type DebugSession = {
+  id: string
+  role: string
+  created_at: string
+  expires_at: string
+}
+
+export type DebugEvent = {
+  timestamp: string
+  type: string
+  label: string
+  status: string
+  duration_ms?: number | null
+  data?: any
+}
+
+export type DebugRunSummary = {
+  id: string
+  kind: string
+  status: string
+  created_at: string
+  updated_at: string
+  event_count: number
+  error?: string | null
+}
+
+export type DebugRunDetail = {
+  id: string
+  kind: string
+  status: string
+  created_at: string
+  updated_at: string
+  config: Record<string, any>
+  events: DebugEvent[]
+  artifacts?: Record<string, any>
+  explanation?: { generated_at: string; duration_ms: number; content: string } | null
+  error?: string | null
+  job_running?: boolean
+}
+
+export type DebugUnitSpec = {
+  name: string
+  description: string
+  function_name: string
+  input_schema: Record<string, any>
+  expected_io: Record<string, any>
+  sample_input: Record<string, any>
+}
+
+export type OpenApiSpec = Record<string, any>

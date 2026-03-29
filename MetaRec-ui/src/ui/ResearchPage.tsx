@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import './ResearchPage.css'
+import '../style/ResearchPage.css'
 
 export function ResearchPage(): JSX.Element {
   const navigate = useNavigate()

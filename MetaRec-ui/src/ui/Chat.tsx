@@ -152,6 +152,17 @@ export function Chat({ selectedTypes, selectedFlavors, currentModel, chatHistory
     />
   }, [userId, conversationId, handleAddressClick, saveRecommendationResult])
 
+  // 处理任务创建的回调函数 (把重复的处理过程模块化)
+  const handleTaskCreated = useCallback((taskId: string, thinkingSteps?: ThinkingStep[], source: string = 'unknown') => {
+    console.log('[Chat] Task created:', {
+      source,
+      taskId,
+      thinkingSteps
+    })
+    setCurrentTaskId(taskId)
+    appendMessage({ role: 'assistant', content: createProcessingView(taskId) })
+  }, [appendMessage, createProcessingView, setCurrentTaskId])
+
   // 加载历史对话消息
   useEffect(() => {
     const loadHistory = async () => {
@@ -464,8 +475,7 @@ export function Chat({ selectedTypes, selectedFlavors, currentModel, chatHistory
       } else if (res.thinking_steps) {
         const taskIdMatch = res.thinking_steps[0]?.details?.match(/Task ID: (.+)/)
         if (taskIdMatch) {
-          setCurrentTaskId(taskIdMatch[1])
-          appendMessage({ role: 'assistant', content: createProcessingView(taskIdMatch[1]) })
+          handleTaskCreated(taskIdMatch[1], res.thinking_steps, 'preference_confirm')
         }
       } else if (res.restaurants && res.restaurants.length > 0) {
         const resultsContent = <ResultsView data={res} onAddressClick={handleAddressClick} />
@@ -522,8 +532,7 @@ export function Chat({ selectedTypes, selectedFlavors, currentModel, chatHistory
         } else if (response.thinking_steps) {
           const taskIdMatch = response.thinking_steps[0]?.details?.match(/Task ID: (.+)/)
           if (taskIdMatch) {
-            setCurrentTaskId(taskIdMatch[1])
-            appendMessage({ role: 'assistant', content: createProcessingView(taskIdMatch[1]) })
+            handleTaskCreated(taskIdMatch[1], response.thinking_steps, 'confirmation_yes')
           }
         } else if (response.restaurants && response.restaurants.length > 0) {
           const resultsContent = <ResultsView data={response} onAddressClick={handleAddressClick} />
@@ -593,8 +602,7 @@ export function Chat({ selectedTypes, selectedFlavors, currentModel, chatHistory
         } else if (response.thinking_steps) {
           const taskIdMatch = response.thinking_steps[0]?.details?.match(/Task ID: (.+)/)
           if (taskIdMatch) {
-            setCurrentTaskId(taskIdMatch[1])
-            appendMessage({ role: 'assistant', content: createProcessingView(taskIdMatch[1]) })
+            handleTaskCreated(taskIdMatch[1], response.thinking_steps, 'confirmation_not_satisfied')
           }
         } else if (response.restaurants && response.restaurants.length > 0) {
           const resultsContent = <ResultsView data={response} onAddressClick={handleAddressClick} />
@@ -612,7 +620,7 @@ export function Chat({ selectedTypes, selectedFlavors, currentModel, chatHistory
       onConfirm: handleConfirm,
       onNotSatisfied: handleNotSatisfied
     }
-  }, [messages, conversationId, userId, onMessageAdded, useOnlineAgent, handlePreferenceConfirm, handleAddressClick, saveRecommendationResult, saveAssistantMessage, appendMessage, setLoading, setCurrentTaskId, setFloatingConfirmation, buildConversationHistory, saveUserMessage, createProcessingView])
+  }, [messages, conversationId, userId, onMessageAdded, useOnlineAgent, handlePreferenceConfirm, handleAddressClick, saveRecommendationResult, saveAssistantMessage, appendMessage, setLoading, setCurrentTaskId, setFloatingConfirmation, buildConversationHistory, saveUserMessage, createProcessingView, handleTaskCreated])
 
   function toggleVoiceInput() {
     if (!recognitionRef.current) {
@@ -736,18 +744,7 @@ export function Chat({ selectedTypes, selectedFlavors, currentModel, chatHistory
         if (res.thinking_steps.length > 0) {
           const taskIdMatch = res.thinking_steps[0].details?.match(/Task ID: (.+)/)
           if (taskIdMatch) {
-            const taskId = taskIdMatch[1]
-            console.log('[Chat] Task created:', {
-              taskId,
-              thinkingSteps: res.thinking_steps
-            })
-            setCurrentTaskId(taskId)
-            // Show ProcessingView, which will automatically poll and update
-            const processingContent = createProcessingView(taskId)
-            appendMessage({ 
-              role: 'assistant', 
-              content: processingContent
-            })
+            handleTaskCreated(taskIdMatch[1], res.thinking_steps, 'on_send')
           }
         }
       } else {
@@ -1478,6 +1475,67 @@ function ProcessingView({ taskId, userId, conversationId, onAddressClick, onComp
   const [status, setStatus] = useState<TaskStatus | null>(null)
   const [currentStep, setCurrentStep] = useState(0)
   const [displayedSteps, setDisplayedSteps] = useState<ThinkingStep[]>([])
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle')
+
+  useEffect(() => {
+    if (copyState !== 'copied') return
+    const timer = window.setTimeout(() => setCopyState('idle'), 1500)
+    return () => window.clearTimeout(timer)
+  }, [copyState])
+
+  const copyTaskId = async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(taskId)
+      } else {
+        throw new Error('Clipboard API unavailable')
+      }
+      setCopyState('copied')
+    } catch (error) {
+      console.warn('[ProcessingView] Failed to copy task ID:', { taskId, error })
+      setCopyState('error')
+      window.setTimeout(() => setCopyState('idle'), 2000)
+    }
+  }
+
+  const taskIdInfo = (
+    <div
+      style={{
+        marginTop: '10px',
+        padding: '8px 10px',
+        borderRadius: '10px',
+        border: '1px solid rgba(194, 122, 54, 0.18)',
+        background: 'rgba(255, 250, 244, 0.9)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '8px',
+        flexWrap: 'wrap',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+        <span style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>Task ID</span>
+        <code style={{ fontSize: '0.8rem', wordBreak: 'break-all' }}>{taskId}</code>
+      </div>
+      <button
+        type="button"
+        onClick={copyTaskId}
+        style={{
+          border: '1px solid var(--line)',
+          background: '#fff',
+          color: 'var(--fg)',
+          borderRadius: '8px',
+          padding: '4px 8px',
+          cursor: 'pointer',
+          fontSize: '0.8rem',
+          whiteSpace: 'nowrap',
+        }}
+        title="Copy task ID"
+      >
+        {copyState === 'copied' ? 'Copied' : copyState === 'error' ? 'Copy failed' : 'Copy Task ID'}
+      </button>
+    </div>
+  )
   
   useEffect(() => {
     const pollStatus = async () => {
@@ -1558,6 +1616,7 @@ function ProcessingView({ taskId, userId, conversationId, onAddressClick, onComp
         <div className="processing-message">
           Initializing...
         </div>
+        {taskIdInfo}
       </div>
     )
   }
@@ -1585,8 +1644,11 @@ function ProcessingView({ taskId, userId, conversationId, onAddressClick, onComp
   // If task has error, show error
   if (status.status === 'error') {
     return (
-      <div className="content" style={{ borderColor: 'var(--error)' }}>
-        Error: {status.error || 'Unknown error occurred'}
+      <div>
+        <div className="content" style={{ borderColor: 'var(--error)' }}>
+          Error: {status.error || 'Unknown error occurred'}
+        </div>
+        {taskIdInfo}
       </div>
     )
   }
@@ -1607,6 +1669,7 @@ function ProcessingView({ taskId, userId, conversationId, onAddressClick, onComp
       <div className="processing-message">
         {status.message}
       </div>
+      {taskIdInfo}
       
       {/* Display thinking steps */}
       {displayedSteps.length > 0 && (
@@ -2100,5 +2163,3 @@ function ResultsView({
     </div>
   )
 }
-
-
