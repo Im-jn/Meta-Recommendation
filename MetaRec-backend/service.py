@@ -2,7 +2,7 @@
 MetaRec 核心服务类
 提供餐厅推荐的核心业务逻辑，可以被其他模块直接调用
 """
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Union
 import asyncio
 import uuid
 import random
@@ -11,6 +11,7 @@ import json
 import os
 from datetime import datetime
 from pydantic import BaseModel
+from openai import AsyncOpenAI, AsyncAzureOpenAI, OpenAI, AzureOpenAI
 
 # 导入 LLM 服务
 from llm_service import analyze_user_message, generate_confirmation_message, generate_missing_preferences_guidance, LLMResponse, detect_language
@@ -89,11 +90,25 @@ class MetaRecService:
     - 餐厅推荐
     """
     
-    def __init__(self, restaurant_data: Optional[List[Dict]] = None):
+    def __init__(
+            self, 
+            async_client: Union[AsyncOpenAI, AsyncAzureOpenAI],
+            sync_client: Union[OpenAI, AzureOpenAI],
+            summary_model: str,
+            planning_model: str,
+            llm_model: str,
+            restaurant_data: Optional[List[Dict]] = None,
+        ):
         """
         初始化服务
         
         Args:
+            async_client: async openai client
+            sync_client: sync openai client
+            summary_model: model name for summary task
+            planning_model: model name for planning task
+            llm_model: model name for other task
+
             restaurant_data: 餐厅数据列表，如果为None则使用默认样例数据
         """
         # 餐厅数据库
@@ -106,6 +121,13 @@ class MetaRecService:
         
         # 用户画像存储
         self.profile_storage = get_profile_storage() if get_profile_storage else None
+        
+        self.async_client = async_client
+        self.sync_client = sync_client
+        
+        self.summary_model = summary_model
+        self.planning_model = planning_model
+        self.llm_model = llm_model
     
     def _get_session_key(self, user_id: str, session_id: Optional[str] = None) -> str:
         """
@@ -798,7 +820,16 @@ class MetaRecService:
                     user_profile = self.profile_storage.get_user_profile(user_id)
                 
                 # 生成确认消息
-                message = await generate_confirmation_message(query, preferences, language, user_profile, guide_missing_preferences)
+                message = await generate_confirmation_message(
+                    self.async_client, 
+                    self.llm_model, 
+                    query, 
+                    preferences, 
+                    language, 
+                    user_profile, 
+                    guide_missing_preferences,
+                    model=self.llm_model,
+                )
             except Exception as e:
                 print(f"Error generating LLM confirmation message, falling back to template: {e}")
                 # 回退到模板格式
@@ -1129,7 +1160,7 @@ class MetaRecService:
             executions = []
             summary_content = None
             
-            async for status_update in execute_agent_pipeline(user_input, use_online=use_online_agent):
+            async for status_update in execute_agent_pipeline(self.sync_client, self.summary_model, self.planning_model, user_input, use_online=use_online_agent):
                 # 更新任务状态
                 stage = status_update.get("stage", "")
                 stage_number = status_update.get("stage_number", 0)
@@ -1546,11 +1577,13 @@ class MetaRecService:
             
             # Step 2: 使用 LLM 进行意图识别（根据当前状态）
             llm_response = await analyze_user_message(
+                self.async_client,
                 query, 
                 enhanced_history,  # 使用增强后的对话历史
                 user_profile,
                 is_in_query_flow=is_in_query_flow,
-                pending_preferences=pending_preferences
+                pending_preferences=pending_preferences,
+                model=self.llm_model,
             )
             
             # Step 2.5: 更新用户画像（如果有新的画像信息）
@@ -1714,9 +1747,11 @@ class MetaRecService:
                                 
                                 # 生成引导缺失偏好的消息
                                 guidance_message = await generate_missing_preferences_guidance(
+                                    self.async_client,
                                     current_preferences,
                                     language,
-                                    user_profile_for_guidance
+                                    user_profile_for_guidance,
+                                    model=self.llm_model,
                                 )
                                 
                                 # 更新上下文中的确认消息
@@ -2007,7 +2042,7 @@ class MetaRecService:
                 
                 # 使用 LLM 分析用户回复
                 # analyze_user_message 会自动将 query 添加到消息列表的最后
-                llm_response = await analyze_user_message(query, enhanced_history, user_profile)
+                llm_response = await analyze_user_message(self.async_client, query, enhanced_history, user_profile)
                 
                 # 如果 LLM 检测到新的偏好信息（intent 为 query 且有 preferences）
                 if llm_response.intent == "query" and llm_response.preferences:
@@ -2111,6 +2146,7 @@ class MetaRecService:
                             
                             # 生成引导缺失偏好的消息
                             guidance_message = await generate_missing_preferences_guidance(
+                                self.async_client,
                                 current_preferences,
                                 language,
                                 user_profile
@@ -2256,16 +2292,36 @@ class MetaRecService:
 
 # ==================== 便捷函数 ====================
 
-def create_service(restaurant_data: Optional[List[Dict]] = None) -> MetaRecService:
+def create_service(
+        async_client: Union[AsyncOpenAI, AsyncAzureOpenAI],
+        sync_client: Union[OpenAI, AzureOpenAI],
+        summary_model: str,
+        planning_model: str,
+        llm_model: str,
+        restaurant_data: Optional[List[Dict]] = None,
+    ) -> MetaRecService:
     """
     创建服务实例的便捷函数
     
     Args:
+        async_client: async openai client
+        sync_client: sync openai client
+        summary_model: model name for summary task
+        planning_model: model name for planning task
+        llm_model: model name for other task
+
         restaurant_data: 可选的餐厅数据
-        
+
     Returns:
         MetaRecService实例
     """
-    return MetaRecService(restaurant_data)
+    return MetaRecService(
+            async_client, 
+            sync_client,
+            summary_model,
+            planning_model,
+            llm_model,
+            restaurant_data
+    )
 
 

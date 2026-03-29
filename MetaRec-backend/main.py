@@ -2,6 +2,10 @@
 MetaRec FastAPI Application
 提供HTTP API接口，调用核心服务层
 """
+from dotenv import load_dotenv, find_dotenv
+dotenv_path = find_dotenv()
+load_dotenv(dotenv_path)
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -9,10 +13,12 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from datetime import datetime
+from client import create_async_client, create_sync_azure_client, create_sync_client, create_async_azure_client
 import os
 import json
 import logging
 import sys
+
 
 # 配置日志系统 - 确保实时输出到控制台
 logging.basicConfig(
@@ -56,10 +62,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# create OpenAI clients
+async_client = create_async_client()
+llm_model = os.getenv('LLM_MODEL')
+
+try:
+    sync_client = create_sync_azure_client()
+    summary_model = os.getenv('AZURE_AGENT_SUMMARY_MODEL', 'o4-mini')
+    planning_model = os.getenv('AZURE_AGENT_PLANNING_MODEL', 'gpt-4.1')
+except Exception as e:
+    print('[Warning] Unable to create AzureOpenAI client, falling back to OpenAI client')
+    sync_client = create_sync_client()
+    summary_model = os.getenv('AGENT_SUMMARY_MODEL')
+    planning_model = os.getenv('AGENT_PLANNING_MODEL')
+
 # ==================== 创建服务实例 ====================
 # 这是全局服务实例，可以被所有路由使用
-metarec_service = MetaRecService()
-app.include_router(create_debug_router(lambda: metarec_service))
+metarec_service = MetaRecService(async_client, sync_client, summary_model, planning_model, llm_model)
 
 # ==================== Conversation Preferences 内存缓存 ====================
 # 存储格式: {f"{user_id}:{conversation_id}": preferences_dict}

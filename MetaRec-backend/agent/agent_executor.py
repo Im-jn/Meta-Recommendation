@@ -8,7 +8,8 @@ import os
 import sys
 import glob
 from pathlib import Path
-from typing import Any, Dict, List, AsyncGenerator, Optional
+from typing import Any, Dict, List, AsyncGenerator, Optional, Union
+from openai import OpenAI, AzureOpenAI
 from .agent_plan import run_demo
 from .agent_mcp.agent_google_map import search_google_maps
 from .agent_mcp.agent_xiaohongshu import search_notes_by_keyword
@@ -141,11 +142,19 @@ def dispatch_tool_call(name: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         return result
 
 
-async def execute_offline_agent(user_input: str) -> AsyncGenerator[Dict[str, Any], None]:
+async def execute_offline_agent(
+        client: any, # not used
+        summary_model: any, # not used
+        planning_model: any, # not used
+        user_input: str,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     执行 agent 管道，通过 yield 返回状态更新
     
     Args:
+        client: Value is not used, argument exists so that offline and online execution functions have the same function signature
+        summary_model: Value is not used, argument exists so that offline and online execution functions have the same function signature
+        planning_model: Value is not used, argument exists so that offline and online execution functions have the same function signature
         user_input: 用户输入（可以是 JSON 字符串或字典）
         
     Yields:
@@ -377,11 +386,19 @@ async def execute_offline_agent(user_input: str) -> AsyncGenerator[Dict[str, Any
         }
 
 
-async def execute_online_agent(user_input: str) -> AsyncGenerator[Dict[str, Any], None]:
+async def execute_online_agent(
+        client: Union[OpenAI, AzureOpenAI],
+        summary_model: str,
+        planning_model: str,
+        user_input: str,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     执行 agent 管道，通过 yield 返回状态更新
     
     Args:
+        client: sync OpenAI Client
+        summary_model: LLM model name for summary task
+        planning_model: LLM model name for planning task
         user_input: 用户输入（可以是 JSON 字符串或字典）
         
     Yields:
@@ -410,7 +427,7 @@ async def execute_online_agent(user_input: str) -> AsyncGenerator[Dict[str, Any]
     
     try:
         # 在线程池中执行同步的 run_demo 调用
-        planning_resp = await asyncio.to_thread(run_demo, user_input)
+        planning_resp = await asyncio.to_thread(run_demo, client, user_input, planning_model)
         plan_calls = parse_planner_output(planning_resp)
         tool_names = [call.get("name", "unknown") for call in plan_calls]
         tool_names_display = ", ".join([
@@ -519,9 +536,11 @@ async def execute_online_agent(user_input: str) -> AsyncGenerator[Dict[str, Any]
             print("Calling AI to generate recommendations...")
             summary_resp = await asyncio.to_thread(
                 summarize_recommendations, 
+                client,
                 user_input, 
                 gmap_results, 
-                xhs_results
+                xhs_results,
+                summary_model,
             )
             summary_content = summary_resp.choices[0].message.content if summary_resp and summary_resp.choices else None
             print("AI summary generated (%d chars)", len(summary_content) if summary_content else 0)
@@ -555,6 +574,9 @@ async def execute_online_agent(user_input: str) -> AsyncGenerator[Dict[str, Any]
 
 
 async def execute_agent_pipeline(
+    client: Union[AzureOpenAI, OpenAI],
+    summary_model: str,
+    planning_model: str,
     user_input: str,
     use_online: Optional[bool] = None
 ) -> AsyncGenerator[Dict[str, Any], None]:
@@ -562,6 +584,9 @@ async def execute_agent_pipeline(
     执行 agent 管道，通过 yield 返回状态更新
     
     Args:
+        client: sync OpenAI Client
+        summary_model: LLM model name for summary task
+        planning_model: LLM model name for planning task
         user_input: 用户输入（可以是 JSON 字符串或字典）
         use_online: 是否使用在线模式（None 时使用环境变量 OFFLINE_TEST）
         
@@ -592,6 +617,6 @@ async def execute_agent_pipeline(
     else:
         agent_pipeline = execute_offline_agent
     
-    async for result in agent_pipeline(user_input):
+    async for result in agent_pipeline(client, summary_model, planning_model, user_input):
         yield result
 

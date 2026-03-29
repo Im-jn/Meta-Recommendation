@@ -29,7 +29,8 @@ logger.setLevel(logging.INFO)
 # TIKHUB API 配置
 TIKHUB_API_KEY = os.getenv("TIKHUB_API_KEY")
 if not TIKHUB_API_KEY:
-    raise ValueError("TIKHUB_API_KEY environment variable is not set. Please set it in your .env file.")
+    #raise ValueError("TIKHUB_API_KEY environment variable is not set. Please set it in your .env file.")
+    logger.warn("TIKHUB_API_KEY environment variable is not set. Please set it in your .env file.")
 
 HEADERS_TIKHUB = {
     "Authorization": f"Bearer {TIKHUB_API_KEY}"

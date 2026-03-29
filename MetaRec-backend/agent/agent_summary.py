@@ -1,35 +1,19 @@
-from openai import AzureOpenAI
+from openai import AzureOpenAI, OpenAI
+from typing import Union
 import os
 import json
 from pathlib import Path
 from dotenv import load_dotenv
 
-# 加载 .env 文件
-# 从当前文件向上查找 MetaRec-backend 目录中的 .env 文件
-env_path = Path(__file__).parent.parent / '.env'
-load_dotenv(dotenv_path=env_path)
 import glob
 from typing import Any, Dict, List, Union
 import logging
 from datetime import datetime
 
 # Azure OpenAI 配置
-deployment_name = "o4-mini"  # Azure 部署名称
+DEPLOYMENT_NAME = "o4-mini"  # Azure 部署名称
 
 # 从环境变量读取配置
-api_key = os.getenv("OPENAI_API_KEY")
-if not api_key:
-    raise ValueError("OPENAI_API_KEY environment variable is not set")
-
-# Azure OpenAI 端点和 API 版本
-azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "https://agenthiack.openai.azure.com/")
-api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
-
-client = AzureOpenAI(
-    api_key=api_key,
-    azure_endpoint=azure_endpoint,
-    api_version=api_version
-)
 
 # 模块级 logger，作为库被调用时不主动配置处理器
 logger = logging.getLogger(__name__)
@@ -61,10 +45,12 @@ SYSTEM_PROMPT = (
 
 
 def summarize_recommendations(
+    client: Union[AzureOpenAI, OpenAI],
     user_input: Union[str, Dict[str, Any]],
     gmap_search_results: Any,
     xhs_search_results: Any,
     # temperature: float = 0.2,
+    model: str = DEPLOYMENT_NAME,
 ):
     if not isinstance(user_input, str):
         try:
@@ -90,7 +76,7 @@ def summarize_recommendations(
     )
 
     completion = client.chat.completions.create(
-        model=deployment_name,
+        model=model,
         temperature=1,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -102,6 +88,26 @@ def summarize_recommendations(
 
 
 if __name__ == "__main__":
+    # load client
+    # 加载 .env 文件
+    # 从当前文件向上查找 MetaRec-backend 目录中的 .env 文件
+    env_path = Path(__file__).parent.parent / '.env'
+    load_dotenv(dotenv_path=env_path)
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY environment variable is not set")
+
+    # Azure OpenAI 端点和 API 版本
+    azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "https://agenthiack.openai.azure.com/")
+    api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+
+    client = AzureOpenAI(
+        api_key=api_key,
+        azure_endpoint=azure_endpoint,
+        api_version=api_version
+    )
+
     # 仅在独立运行时配置该模块自己的日志系统
     # 使用相对于当前文件的路径，兼容 macOS 和 Linux
     base_dir = Path(__file__).parent
@@ -171,7 +177,7 @@ if __name__ == "__main__":
         xhs_results = []
 
     logger.info("summarizing recommendations...")
-    resp = summarize_recommendations(user_input, gmap_results, xhs_results)
+    resp = summarize_recommendations(client, user_input, gmap_results, xhs_results)
     content = resp.choices[0].message.content
     logger.info("summary generated (%d chars)", len(content) if content else 0)
     logger.info("summary output:\n%s", content if content else "<empty>")

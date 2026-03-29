@@ -6,31 +6,16 @@ LLM 服务模块
 import json
 import os
 import re
-from typing import Dict, Any, Optional, AsyncIterator
+from typing import Dict, Any, Optional, AsyncIterator, Union
 from pydantic import BaseModel
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, AsyncAzureOpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
 
 # 获取 API 配置，支持多种免费 API
 # 默认使用 Groq（完全免费，速度快）
-LLM_API_KEY = os.getenv("LLM_API_KEY", os.getenv("GROQ_API_KEY", ""))
-LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1")
 LLM_MODEL = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
-
-# 如果没有配置 API Key，尝试使用其他免费选项
-if not LLM_API_KEY:
-    # 可以在这里添加其他免费 API 的配置
-    # 例如：Together AI、OpenRouter 等
-    pass
-
-# 初始化 OpenAI 兼容客户端（支持 Groq、Together AI 等）
-client = AsyncOpenAI(
-    api_key=LLM_API_KEY,
-    base_url=LLM_BASE_URL
-)
-
 
 class LLMResponse(BaseModel):
     """LLM 响应模型"""
@@ -208,11 +193,13 @@ def get_stream_system_prompt(language: str = "en") -> str:
 
 
 async def analyze_user_message(
+    client: Union[AsyncOpenAI, AsyncAzureOpenAI],
     message: str,
     conversation_history: Optional[list] = None,
     user_profile: Optional[Dict[str, Any]] = None,
     is_in_query_flow: bool = False,
-    pending_preferences: Optional[Dict[str, Any]] = None
+    pending_preferences: Optional[Dict[str, Any]] = None,
+    model: str = LLM_MODEL,
 ) -> LLMResponse:
     """
     使用免费大模型 API（Groq 等）分析用户消息，返回意图和回复
@@ -261,7 +248,7 @@ async def analyze_user_message(
         # 注意：某些模型可能不支持 response_format，需要处理
         try:
             response = await client.chat.completions.create(
-                model=LLM_MODEL,
+                model=model,
                 messages=messages,
                 temperature=0.7,
                 response_format={"type": "json_object"}  # 强制 JSON 格式
@@ -271,7 +258,7 @@ async def analyze_user_message(
             if "response_format" in str(e).lower():
                 print(f"Model doesn't support response_format, retrying without it: {e}")
                 response = await client.chat.completions.create(
-                    model=LLM_MODEL,
+                    model=model,
                     messages=messages,
                     temperature=0.7
                 )
@@ -386,11 +373,13 @@ async def analyze_user_message(
 
 
 async def generate_confirmation_message(
+    client: Union[AsyncOpenAI, AsyncAzureOpenAI],
     query: str,
     preferences: Dict[str, Any],
     language: str = "en",
     user_profile: Optional[Dict[str, Any]] = None,
-    guide_missing_preferences: bool = False
+    guide_missing_preferences: bool = False,
+    model: str = LLM_MODEL,
 ) -> str:
     """
     使用 LLM 生成自然的确认消息
@@ -557,7 +546,7 @@ Generate natural friendly confirmation message(2-3 sentences): no list format, n
     try:
         messages = [{"role": "user", "content": prompt}]
         response = await client.chat.completions.create(
-            model=LLM_MODEL,
+            model=model,
             messages=messages,
             temperature=0.8,  # 稍高的温度让回复更自然
             max_tokens=200
@@ -573,9 +562,11 @@ Generate natural friendly confirmation message(2-3 sentences): no list format, n
 
 
 async def generate_missing_preferences_guidance(
+    client: Union[AsyncOpenAI, AsyncAzureOpenAI],
     preferences: Dict[str, Any],
     language: str = "en",
-    user_profile: Optional[Dict[str, Any]] = None
+    user_profile: Optional[Dict[str, Any]] = None,
+    model: str = LLM_MODEL,
 ) -> str:
     """
     生成引导用户填写缺失偏好的消息
@@ -629,7 +620,7 @@ Generate natural friendly guidance message(2-3 sentences): no list format, natur
     try:
         messages = [{"role": "user", "content": prompt}]
         response = await client.chat.completions.create(
-            model=LLM_MODEL,
+            model=model,
             messages=messages,
             temperature=0.8,
             max_tokens=200
@@ -645,8 +636,10 @@ Generate natural friendly guidance message(2-3 sentences): no list format, natur
 
 
 async def stream_llm_response(
+    client: Union[AsyncOpenAI, AsyncAzureOpenAI],
     message: str,
-    conversation_history: Optional[list] = None
+    conversation_history: Optional[list] = None,
+    model: str = LLM_MODEL,
 ) -> AsyncIterator[str]:
     """
     流式生成 LLM 回复（用于逐字显示）
@@ -689,7 +682,7 @@ async def stream_llm_response(
     try:
         # 流式调用免费大模型 API（Groq 等）
         stream = await client.chat.completions.create(
-            model=LLM_MODEL,
+            model=model,
             messages=messages,
             temperature=0.7,
             stream=True

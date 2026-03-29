@@ -1,27 +1,13 @@
-from openai import AzureOpenAI
+from openai import AzureOpenAI, OpenAI
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from typing import Union
 
 # 加载 .env 文件
-env_path = Path(__file__).parent.parent / '.env'
-load_dotenv(dotenv_path=env_path)
-
-# Azure OpenAI 配置
-azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "https://agenthiack.openai.azure.com/")
-api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
-deployment_name = "gpt-4.1"
+DEPLOYMENT_NAME = "gpt-4.1"
 
 # 从环境变量读取 API Key
-api_key = os.getenv("OPENAI_API_KEY")
-if not api_key:
-    raise ValueError("OPENAI_API_KEY environment variable is not set")
-
-client = AzureOpenAI(
-    api_key=api_key,
-    azure_endpoint=azure_endpoint,
-    api_version=api_version
-)
 
 
 SYSTEM_PROMPT = (
@@ -88,14 +74,18 @@ TOOLS = [
     }
 ]
 
-def run_demo(user_input: str):
+def run_demo(
+        client: Union[AzureOpenAI, OpenAI],
+        user_input: str,
+        model: str = DEPLOYMENT_NAME, # default
+    ):
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_input},
     ]
 
     completion = client.chat.completions.create(
-        model=deployment_name,
+        model=model,
         temperature=0.2,
         messages=messages,
         tools=TOOLS,
@@ -117,7 +107,23 @@ if __name__ == "__main__":
         "}"
     )
 
-    resp = run_demo(example_input)
+    env_path = Path(__file__).parent.parent / '.env'
+    load_dotenv(dotenv_path=env_path)
+    
+    api_key = os.getenv('OPENAI_API_KEY')
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY environment variable is not set")
+
+    azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "https://agenthiack.openai.azure.com/")
+    api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+    
+    client = AzureOpenAI(
+        api_key=api_key,
+        api_version=api_version,
+        azure_endpoint=azure_endpoint,
+    )
+
+    resp = run_demo(client, example_input, DEPLOYMENT_NAME)
     # 打印第一条消息以便查看是否产生 function call
     first_choice = resp.choices[0].message
     print(first_choice)
