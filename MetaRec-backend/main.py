@@ -80,6 +80,9 @@ except Exception as e:
 # 这是全局服务实例，可以被所有路由使用
 metarec_service = MetaRecService(async_client, sync_client, summary_model, planning_model, llm_model)
 
+# 挂载内部 debug 路由（具体可用性由 DEBUG_UI_ENABLED 等环境变量控制）
+app.include_router(create_debug_router(lambda: metarec_service))
+
 # ==================== Conversation Preferences 内存缓存 ====================
 # 存储格式: {f"{user_id}:{conversation_id}": preferences_dict}
 conversation_preferences_cache: Dict[str, Dict[str, Any]] = {}
