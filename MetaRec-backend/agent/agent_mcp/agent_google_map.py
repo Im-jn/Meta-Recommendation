@@ -91,15 +91,15 @@ def search_google_maps(query, latitude=None, longitude=None, zoom=None, map_heig
         logger.info(f"✅ Google Maps 搜索成功")
         
         # 提取搜索结果
-        local_results = data.get('local_results', [])
+        search_results = data.get('local_results', data.get('place_results', []))
         
-        if not local_results:
+        if not search_results:
             logger.warning(f"⚠️  未找到任何结果")
             return []
         
         # 提取关键信息，限制结果数量
         results = []
-        for item in local_results[:max_results]:
+        for item in search_results[:max_results]:
             extracted = {
                 'title': item.get('title'),
                 'rating': item.get('rating'),
