@@ -911,10 +911,8 @@ async def serve_spa(full_path: str):
     """SPA fallback - 所有未匹配的路由返回 index.html"""
     # 检查是否是静态文件
     file_path = FRONTEND_DIST.joinpath(full_path).resolve()
-    print(FRONTEND_DIST)
-    print(file_path)
     
-    # 1. Prevent escaping FRONTEND_DIST directory using path traversal i.e. '..' which would otherwise allow user to access arbitrary files on the filesystem
+    # 1. Prevent escaping FRONTEND_DIST directory using path traversal i.e. '../' which would otherwise allow user to access arbitrary files on the filesystem
     # TODO: consider logging this to track malicious users?
     if not file_path.is_relative_to(FRONTEND_DIST):
         raise HTTPException(status_code=403, detail="Forbidden")
