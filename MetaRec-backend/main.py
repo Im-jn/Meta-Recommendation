@@ -910,7 +910,9 @@ async def serve_root():
 async def serve_spa(full_path: str):
     """SPA fallback - 所有未匹配的路由返回 index.html"""
     # 检查是否是静态文件
-    file_path = FRONTEND_DIST / full_path
+    file_path = FRONTEND_DIST.joinpath(full_path).resolve()
+    print(FRONTEND_DIST)
+    print(file_path)
     
     # 1. Prevent escaping FRONTEND_DIST directory using path traversal i.e. '..' which would otherwise allow user to access arbitrary files on the filesystem
     # TODO: consider logging this to track malicious users?
