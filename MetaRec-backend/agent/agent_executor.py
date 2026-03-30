@@ -135,7 +135,8 @@ def dispatch_tool_call(name: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         
         if name == "yelp.search":
             query = parameters.get("query", "")
-            output = search_yelp_organic_results(query=query, max_results=10)
+            location = parameters.get("location", "")
+            output = search_yelp_organic_results(query=query, location=location, max_results=10)
             result.update({"output": output, "success": output is not None})
             print("yelp.search success=%s, items=%s", result["success"], len(output) if output else 0)
             return result
