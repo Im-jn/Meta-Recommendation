@@ -6,6 +6,7 @@ from dotenv import load_dotenv, find_dotenv
 dotenv_path = find_dotenv()
 load_dotenv(dotenv_path)
 
+from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -175,7 +176,7 @@ def update_conversation_preferences_cached(
 
 
 # ==================== 静态文件服务配置 ====================
-FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "..", "frontend-dist")
+FRONTEND_DIST = (Path(__file__).parent.parent / 'frontend-dist').resolve()
 
 # 启动时检查静态文件目录
 def check_frontend_dist():
@@ -909,11 +910,18 @@ async def serve_root():
 async def serve_spa(full_path: str):
     """SPA fallback - 所有未匹配的路由返回 index.html"""
     # 检查是否是静态文件
-    file_path = os.path.join(FRONTEND_DIST, full_path)
-    if os.path.exists(file_path) and os.path.isfile(file_path):
+    file_path = FRONTEND_DIST / full_path
+    
+    # 1. Prevent escaping FRONTEND_DIST directory using path traversal i.e. '..' which would otherwise allow user to access arbitrary files on the filesystem
+    # TODO: consider logging this to track malicious users?
+    if not file_path.is_relative_to(FRONTEND_DIST):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    
+    # 2. check that the requested file exists
+    if file_path.is_file(): # checks for existence of file and that the file is a regular file
         return FileResponse(file_path)
     
-    # SPA 路由，返回 index.html
+    # 3. fallback to index page
     index_path = os.path.join(FRONTEND_DIST, "index.html")
     if os.path.exists(index_path):
         return FileResponse(index_path)
