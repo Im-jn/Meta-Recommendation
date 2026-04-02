@@ -1,6 +1,7 @@
 from hishel import CacheOptions, SpecificationPolicy
 from hishel.httpx import AsyncCacheClient
 from hishel import AsyncSqliteStorage
+from pathlib import Path
 
 async def log_response(resp):
     is_cached = resp.extensions.get('hishel_from_cache', False)
@@ -12,8 +13,9 @@ async def log_response(resp):
 class BaseAsyncClient:
     def __init__(self, *args, **kwargs):
         #print('init client', args, kwargs)
+        database_path = Path('./temp_cache.db').resolve()
         storage = AsyncSqliteStorage(
-            database_path='temp_cache.db'
+            database_path=database_path,
         )
         
         event_hooks = {
@@ -32,8 +34,4 @@ class BaseAsyncClient:
             event_hooks=event_hooks,
         )
     
-    def log_response_cache_hit_status(self, resp):
-        response_from_cache = resp.extensions.get('hishel_from_cache', False)
-        #print(f'Using cached response? {response_from_cache}')
-
 

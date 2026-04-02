@@ -33,7 +33,6 @@ e       - tag:(rock OR pop)
             'limit': limit,
         }
         resp = await self.client.get('/ws/2/recording', params=params)
-        self.log_response_cache_hit_status(resp)
 
         resp.raise_for_status()
         data = resp.json()
