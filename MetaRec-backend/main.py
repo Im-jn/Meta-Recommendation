@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from client import create_async_client, create_sync_azure_client, create_sync_client, create_async_azure_client
@@ -181,20 +181,20 @@ FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "..", "frontend-dist")
 def check_frontend_dist():
     """检查前端静态文件目录是否存在"""
     if os.path.exists(FRONTEND_DIST):
-        print(f"✅ Frontend dist directory found: {FRONTEND_DIST}")
+        print(f"[INFO] Frontend dist directory found: {FRONTEND_DIST}")
         index_path = os.path.join(FRONTEND_DIST, "index.html")
         if os.path.exists(index_path):
-            print(f"✅ Frontend index.html found: {index_path}")
+            print(f"[INFO] Frontend index.html found: {index_path}")
         else:
-            print(f"⚠️  Warning: index.html not found in {FRONTEND_DIST}")
+            print(f"[WARN] index.html not found in {FRONTEND_DIST}")
         # 列出目录内容
         try:
             files = os.listdir(FRONTEND_DIST)
-            print(f"📁 Frontend dist contents: {files[:10]}...")  # 只显示前10个
+            print(f"[INFO] Frontend dist contents: {files[:10]}...")  # 只显示前10个
         except Exception as e:
-            print(f"⚠️  Error listing frontend dist: {e}")
+            print(f"[WARN] Error listing frontend dist: {e}")
     else:
-        print(f"⚠️  Warning: Frontend dist directory not found: {FRONTEND_DIST}")
+        print(f"[WARN] Frontend dist directory not found: {FRONTEND_DIST}")
 
 # 在应用启动时检查
 check_frontend_dist()
@@ -203,7 +203,45 @@ check_frontend_dist()
 # ==================== API数据模型 ====================
 # 这些模型用于API请求和响应，与服务层的模型分离
 
-class RestaurantAPI(BaseModel):
+class StrictBaseModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class ProcessMessageAPI(StrictBaseModel):
+    role: str
+    content: str
+
+
+class ProcessRequestAPI(StrictBaseModel):
+    query: str
+    user_id: str = "default"
+    conversation_history: Optional[List[ProcessMessageAPI]] = None
+    conversation_id: Optional[str] = None
+    use_online_agent: bool = False
+
+
+class ProcessStreamRequestAPI(StrictBaseModel):
+    query: str
+    user_id: str = "default"
+    conversation_history: Optional[List[ProcessMessageAPI]] = None
+    use_online_agent: bool = False
+
+
+class HealthResponseAPI(StrictBaseModel):
+    status: str
+    timestamp: str
+
+
+class ApiInfoResponseAPI(StrictBaseModel):
+    message: str
+    version: str
+
+
+class FrontendConfigResponseAPI(StrictBaseModel):
+    googleMapsApiKey: str
+
+
+class RestaurantAPI(StrictBaseModel):
     id: str
     name: str
     address: Optional[str] = None
@@ -228,29 +266,35 @@ class RestaurantAPI(BaseModel):
     gps_coordinates: Optional[Dict[str, float]] = None
 
 
-class ThinkingStepAPI(BaseModel):
+class ThinkingStepAPI(StrictBaseModel):
     step: str
     description: str
     status: str
     details: Optional[str] = None
 
 
-class ConfirmationRequestAPI(BaseModel):
+class ConfirmationRequestAPI(StrictBaseModel):
     message: str
-    preferences: Dict[str, Any]
+    preferences: Dict[str, Any] = Field(
+        default_factory=dict,
+        json_schema_extra={"additionalProperties": True},
+    )
     needs_confirmation: bool = True
 
 
-class RecommendationResponseAPI(BaseModel):
+class RecommendationResponseAPI(StrictBaseModel):
     restaurants: List[RestaurantAPI]
     thinking_steps: Optional[List[ThinkingStepAPI]] = None
     confirmation_request: Optional[ConfirmationRequestAPI] = None
     llm_reply: Optional[str] = None  # GPT-4 的回复（用于普通对话）
     intent: Optional[str] = None  # 意图类型
-    preferences: Optional[Dict[str, Any]] = None  # 提取的偏好设置（当 intent 为 "query" 时）
+    preferences: Optional[Dict[str, Any]] = Field(
+        default=None,
+        json_schema_extra={"additionalProperties": True},
+    )  # 提取的偏好设置（当 intent 为 "query" 时）
 
 
-class TaskStatusAPI(BaseModel):
+class TaskStatusAPI(StrictBaseModel):
     task_id: str
     status: str  # "processing", "completed", "error"
     progress: int  # 0-100
@@ -259,9 +303,53 @@ class TaskStatusAPI(BaseModel):
     error: Optional[str] = None
 
 
+class BudgetRangeInputAPI(StrictBaseModel):
+    min: Optional[int] = 20
+    max: Optional[int] = 60
+    currency: str = "SGD"
+    per: str = "person"
+
+
+class UpdatePreferencesRequestAPI(StrictBaseModel):
+    user_id: str = "default"
+    restaurantTypes: List[str] = ["any"]
+    flavorProfiles: List[str] = ["any"]
+    diningPurpose: str = "any"
+    budgetRange: BudgetRangeInputAPI = BudgetRangeInputAPI()
+    location: str = "any"
+
+
+class PreferencesResponseAPI(StrictBaseModel):
+    preferences: Dict[str, Any] = Field(
+        default_factory=dict,
+        json_schema_extra={"additionalProperties": True},
+    )
+
+
+class UpdatePreferencesResponseAPI(StrictBaseModel):
+    message: str
+    preferences: Dict[str, Any] = Field(
+        default_factory=dict,
+        json_schema_extra={"additionalProperties": True},
+    )
+
+
+class UserPreferencesResponseAPI(StrictBaseModel):
+    user_id: str
+    preferences: Dict[str, Any] = Field(
+        default_factory=dict,
+        json_schema_extra={"additionalProperties": True},
+    )
+
+
+class GenericSuccessResponseAPI(StrictBaseModel):
+    success: bool
+    message: str
+
+
 # ==================== API路由 ====================
 
-@app.get("/api")
+@app.get("/api", response_model=ApiInfoResponseAPI)
 async def api_root():
     """
     返回API信息
@@ -272,7 +360,7 @@ async def api_root():
     return {"message": "MetaRec API is running!", "version": "1.0.0"}
 
 
-@app.get("/health")
+@app.get("/health", response_model=HealthResponseAPI)
 async def health_check():
     """
     健康检查
@@ -283,7 +371,7 @@ async def health_check():
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
 
-@app.get("/api/config")
+@app.get("/api/config", response_model=FrontendConfigResponseAPI)
 async def get_config():
     """
     获取前端配置信息（包括 Google Maps API Key）
@@ -297,8 +385,8 @@ async def get_config():
     }
 
 
-@app.post("/api/process")
-async def process_user_request(query_data: Dict[str, Any]):
+@app.post("/api/process", response_model=RecommendationResponseAPI)
+async def process_user_request(query_data: ProcessRequestAPI):
     """
     处理用户请求的统一接口
     融合了 LLM 意图识别、偏好提取、确认流程
@@ -319,17 +407,16 @@ async def process_user_request(query_data: Dict[str, Any]):
         - 如果是修改请求：返回修改提示
     """
     try:
-        query = query_data.get("query", "")
-        user_id = query_data.get("user_id", "default")
-        conversation_history = query_data.get("conversation_history", None)
-        conversation_id = query_data.get("conversation_id", None)
-        use_online_agent = query_data.get("use_online_agent", False)
+        query = query_data.query
+        user_id = query_data.user_id
+        conversation_history = query_data.conversation_history
+        if conversation_history is not None:
+            conversation_history = [msg.model_dump() for msg in conversation_history]
+        conversation_id = query_data.conversation_id
+        use_online_agent = query_data.use_online_agent
         
         # 添加日志，确认参数接收
         print(f"[API] Received request - use_online_agent: {use_online_agent} (type: {type(use_online_agent)})")
-        
-        if not query:
-            raise HTTPException(status_code=400, detail="Query is required")
         
         # 调用异步处理函数（使用 LLM 进行意图识别）
         result = await metarec_service.handle_user_request_async(query, user_id, conversation_history, conversation_id, use_online_agent)
@@ -416,7 +503,7 @@ async def process_user_request(query_data: Dict[str, Any]):
 
 
 @app.post("/api/process/stream")
-async def process_user_request_stream(query_data: Dict[str, Any]):
+async def process_user_request_stream(query_data: ProcessStreamRequestAPI):
     """
     流式处理用户请求（用于逐字显示回复）
     
@@ -427,12 +514,11 @@ async def process_user_request_stream(query_data: Dict[str, Any]):
         Server-Sent Events (SSE) 流，逐字返回 GPT-4 的回复
     """
     try:
-        query = query_data.get("query", "")
-        user_id = query_data.get("user_id", "default")
-        conversation_history = query_data.get("conversation_history", None)
-        
-        if not query:
-            raise HTTPException(status_code=400, detail="Query is required")
+        query = query_data.query
+        user_id = query_data.user_id
+        conversation_history = query_data.conversation_history
+        if conversation_history is not None:
+            conversation_history = [msg.model_dump() for msg in conversation_history]
         
         if stream_llm_response is None:
             raise HTTPException(status_code=500, detail="Stream LLM service not available")
@@ -514,8 +600,8 @@ async def get_task_status(
     )
 
 
-@app.post("/api/update-preferences", response_model=Dict[str, Any])
-async def update_preferences_endpoint(preferences_data: Dict[str, Any]):
+@app.post("/api/update-preferences", response_model=UpdatePreferencesResponseAPI)
+async def update_preferences_endpoint(preferences_data: UpdatePreferencesRequestAPI):
     """
     更新用户偏好设置
     
@@ -534,20 +620,15 @@ async def update_preferences_endpoint(preferences_data: Dict[str, Any]):
         更新后的偏好设置
     """
     try:
-        user_id = preferences_data.get("user_id", "default")
+        user_id = preferences_data.user_id
         
         # 验证和标准化偏好数据
         processed_preferences = {
-            "restaurant_types": preferences_data.get("restaurantTypes", ["any"]),
-            "flavor_profiles": preferences_data.get("flavorProfiles", ["any"]),
-            "dining_purpose": preferences_data.get("diningPurpose", "any"),
-            "budget_range": preferences_data.get("budgetRange", {
-                "min": 20,
-                "max": 60,
-                "currency": "SGD",
-                "per": "person"
-            }),
-            "location": preferences_data.get("location", "any")
+            "restaurant_types": preferences_data.restaurantTypes,
+            "flavor_profiles": preferences_data.flavorProfiles,
+            "dining_purpose": preferences_data.diningPurpose,
+            "budget_range": preferences_data.budgetRange.model_dump(),
+            "location": preferences_data.location
         }
         
         # 调用服务层更新偏好（注意：这里没有 session_id，会使用默认 session）
@@ -563,7 +644,7 @@ async def update_preferences_endpoint(preferences_data: Dict[str, Any]):
         raise HTTPException(status_code=500, detail=f"Error updating preferences: {str(e)}")
 
 
-@app.get("/api/user-preferences/{user_id}")
+@app.get("/api/user-preferences/{user_id}", response_model=UserPreferencesResponseAPI)
 async def get_user_preferences_endpoint(user_id: str):
     """
     获取用户当前的偏好设置
@@ -588,7 +669,7 @@ async def get_user_preferences_endpoint(user_id: str):
 
 # ==================== 对话历史API ====================
 
-class ConversationSummary(BaseModel):
+class ConversationSummary(StrictBaseModel):
     """对话摘要（用于列表）"""
     id: str
     title: str
@@ -599,15 +680,18 @@ class ConversationSummary(BaseModel):
     message_count: int
 
 
-class MessageData(BaseModel):
+class MessageData(StrictBaseModel):
     """消息数据"""
     role: str
     content: str
     timestamp: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = Field(
+        default=None,
+        json_schema_extra={"additionalProperties": True},
+    )
 
 
-class ConversationData(BaseModel):
+class ConversationData(StrictBaseModel):
     """完整对话数据"""
     id: str
     user_id: str
@@ -619,23 +703,26 @@ class ConversationData(BaseModel):
     messages: List[MessageData]
 
 
-class CreateConversationRequest(BaseModel):
+class CreateConversationRequest(StrictBaseModel):
     """创建对话请求"""
     title: Optional[str] = None
     model: str = "RestRec"
 
 
-class UpdateConversationRequest(BaseModel):
+class UpdateConversationRequest(StrictBaseModel):
     """更新对话请求"""
     title: Optional[str] = None
     model: Optional[str] = None
 
 
-class AddMessageRequest(BaseModel):
+class AddMessageRequest(StrictBaseModel):
     """添加消息请求"""
     role: str
     content: str
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = Field(
+        default=None,
+        json_schema_extra={"additionalProperties": True},
+    )
 
 
 @app.get("/api/conversations/{user_id}", response_model=List[ConversationSummary])
@@ -762,7 +849,7 @@ async def update_conversation(
         raise HTTPException(status_code=500, detail=f"Error updating conversation: {str(e)}")
 
 
-@app.post("/api/conversations/{user_id}/{conversation_id}/messages")
+@app.post("/api/conversations/{user_id}/{conversation_id}/messages", response_model=GenericSuccessResponseAPI)
 async def add_message(
     user_id: str,
     conversation_id: str,
@@ -802,7 +889,7 @@ async def add_message(
         raise HTTPException(status_code=500, detail=f"Error adding message: {str(e)}")
 
 
-@app.delete("/api/conversations/{user_id}/{conversation_id}")
+@app.delete("/api/conversations/{user_id}/{conversation_id}", response_model=GenericSuccessResponseAPI)
 async def delete_conversation(user_id: str, conversation_id: str):
     """
     删除对话
@@ -828,7 +915,7 @@ async def delete_conversation(user_id: str, conversation_id: str):
         raise HTTPException(status_code=500, detail=f"Error deleting conversation: {str(e)}")
 
 
-@app.get("/api/conversations/{user_id}/{conversation_id}/preferences")
+@app.get("/api/conversations/{user_id}/{conversation_id}/preferences", response_model=PreferencesResponseAPI)
 async def get_conversation_preferences(user_id: str, conversation_id: str):
     """
     获取对话的偏好设置（优先从内存缓存获取）
@@ -854,11 +941,11 @@ async def get_conversation_preferences(user_id: str, conversation_id: str):
         raise HTTPException(status_code=500, detail=f"Error getting conversation preferences: {str(e)}")
 
 
-@app.put("/api/conversations/{user_id}/{conversation_id}/preferences")
+@app.put("/api/conversations/{user_id}/{conversation_id}/preferences", response_model=PreferencesResponseAPI)
 async def update_conversation_preferences(
     user_id: str,
     conversation_id: str,
-    preferences_data: Dict[str, Any]
+    preferences_data: Dict[str, object]
 ):
     """
     更新对话的偏好设置（同时更新内存缓存和持久化层）
