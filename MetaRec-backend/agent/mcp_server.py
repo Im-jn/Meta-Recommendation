@@ -1,6 +1,6 @@
 import dotenv
 from fastmcp import FastMCP
-from typing import Annotated
+from typing import Annotated, Optional
 from context import ClientContext
 import tools.restaurants
 import tools.entertainment
@@ -68,9 +68,24 @@ async def search_music(
 )
 async def search_movies_by_title(
         query: str,
-    ) -> list[str]:
+    ) -> list[dict]:
     """ Search for movies by their title using TMDB. """
     results = await tools.entertainment.search_movies_by_title(query, ctx)
+    return results
+
+@mcp.tool(
+    name="search.movies_by_genres",
+)
+async def search_movies_by_genres(
+        with_genres: Optional[str]=None,
+        without_genres: Optional[str]=None,
+    ) -> list[dict]:
+    """ Search (discover) movies by their TMDB genre ids. """
+    results = await tools.entertainment.search_movies_by_genres(
+        with_genres,
+        without_genres,
+        ctx
+    )
     return results
 
 @mcp.tool(
@@ -78,7 +93,7 @@ async def search_movies_by_title(
 )
 async def search_tv_by_title(
         query: str,
-    ) -> list[str]:
+    ) -> list[dict]:
     """ Search for TV series by their using TMDB. """
     results = await tools.entertainment.search_tv_by_title(query, ctx)
     return results
@@ -128,8 +143,12 @@ if __name__ == '__main__':
             
             #res = await client.call_tool('search.books', {'query': 'Science Fiction'})
             
-            res = await client.call_tool('search.music', {'query': 'tag:rock'})
+            #res = await client.call_tool('search.music', {'query': 'tag:rock'})
 
+            #res = await client.call_tool('search.movies_by_title', {'query': 'jaws'})
+            #res = await client.call_tool('search.tv_series_by_title', {'query': 'jaws'})
+
+            res = await client.call_tool('search.movies_by_genres', {'with_genres': '99'})
 
             text = res.content[0].text
             data = json.loads(text)
