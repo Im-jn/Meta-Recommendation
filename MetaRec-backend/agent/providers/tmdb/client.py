@@ -67,23 +67,28 @@ class TMDBClient(BaseAsyncClient):
 
     async def search_movie_by_filter(
         self,
-        with_cast: Optional[str],
-        without_cast: Optional[str],
-        with_genres: Optional[str],
-        without_genres: Optional[str],
+        with_cast: Optional[str]=None,
+        without_cast: Optional[str]=None,
+        with_genres: Optional[str]=None,
+        without_genres: Optional[str]=None,
     ):
         params = {}
         
         if with_cast is not None:
             params['with_cast'] = with_cast
+        if without_cast is not None:
+            params['without_cast'] = without_cast
 
         if with_genres is not None:
             params['with_genres'] = with_genres
+        if without_genres is not None:
+            params['without_genres'] = without_genres
 
         resp = await self.client.get('/3/discover/movie', params=params)
         resp.raise_for_status()
         data = resp.json()
-        return data
+        
+        return data.get('results', [])
 
     async def search_tv_by_title(
         self,

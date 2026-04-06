@@ -50,12 +50,59 @@ async def search_music(query: str, ctx: any):
     
     return items
 
-async def search_movies_by_title(query: str, ctx: any):
-    results = await ctx.tmdb.search_movie_by_title(query)
+async def search_movies_by_genres(
+    with_genres: Optional[str],
+    without_genres: Optional[str],
+    ctx: any,
+):
+    results = await ctx.tmdb.search_movie_by_filter(
+        with_genres=with_genres, 
+        without_genres=without_genres,
+    )
+
     config = await ctx.tmdb.get_configuration()
     genres_list = await ctx.tmdb.list_movie_genres()
     language_list = await ctx.tmdb.get_languages()
+    img_base_url = config.get('images').get('secure_base_url')
+    size = 'original'
+
+    items = []
+    for result in results:
+        poster_path = result.get('poster_path')
+        poster_url = None
+        if poster_path is not None:
+            poster_url = f'{img_base_url}{size}{poster_path}'
+        
+        genre_ids = result.get('genre_ids', [])
+        genres = ctx.tmdb.map_genre_ids_to_names(genre_ids, genres_list)
+        
+        original_language = result.get('original_language')
+        original_language = ctx.tmdb.map_language_code_to_name(original_language, language_list)
+
+        extracted = {
+            'title': result.get('title'),
+            'release_date': result.get('release_date'),
+            'overview': result.get('overview'),
+
+            'vote_count': result.get('vote_count'),
+            'popularity': result.get('popularity'),
+            'vote_average': result.get('vote_average'),
+
+            # post processed values
+            'original_language': original_language,
+            'poster_url': poster_url,
+            'genres': genres,
+        }
+        items.append(extracted)
+    return items
     
+
+async def search_movies_by_title(query: str, ctx: any):
+    results = await ctx.tmdb.search_movie_by_title(query)
+
+    config = await ctx.tmdb.get_configuration()
+    genres_list = await ctx.tmdb.list_movie_genres()
+    language_list = await ctx.tmdb.get_languages()
     img_base_url = config.get('images').get('secure_base_url')
     size = 'original'
 
@@ -125,26 +172,6 @@ async def search_tv_by_title(query: str, ctx: any):
             'genres': genres,
         }
         items.append(extracted)
-    return items
-
-async def search_movies_by_filter(
-        with_cast: Optional[str],
-        without_cast: Optional[str],
-        with_genres: Optional[str],
-        without_genres: Optional[str],
-        ctx: any,
-    ):
-    
-    results = await ctx.tmdb.search_movies_by_filter(
-        with_cast=with_cast,
-        without_cast=without_cast,
-        with_genres=with_genres,
-        without_genres=without_genres,
-    )
-    items = []
-    for result in results:
-        print(result)
-        items.append('placeholder movie')
     return items
 
 async def search_books(query: str, ctx: any):
