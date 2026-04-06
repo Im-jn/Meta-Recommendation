@@ -19,6 +19,18 @@ class TMDBClient(BaseAsyncClient):
         
         self.language = 'en'
     
+    async def get_configuration(self):
+        resp = await self.client.get('/3/configuration')
+        resp.raise_for_status()
+        data = resp.json()
+        return data
+
+    async def get_languages(self):
+        resp = await self.client.get('/3/configuration/languages')
+        resp.raise_for_status()
+        data = resp.json()
+        return data
+    
     async def list_movie_genres(self):
         """ Retrieve id-genre name mappings for movies listed on TMDB. """
         params = {
@@ -27,7 +39,7 @@ class TMDBClient(BaseAsyncClient):
         resp = await self.client.get('/3/genre/movie/list', params=params)
         resp.raise_for_status()
         data = resp.json()
-        return data
+        return data.get('genres', [])
 
     async def list_tv_genres(self):
         """ Retrieve id-genre name mappings for tv series listed on TMDB. """
@@ -37,7 +49,7 @@ class TMDBClient(BaseAsyncClient):
         resp = await self.client.get('/3/genre/tv/list', params=params)
         resp.raise_for_status()
         data = resp.json()
-        return data
+        return data.get('genres', [])
     
     async def search_movie_by_title(
         self,
@@ -86,4 +98,43 @@ class TMDBClient(BaseAsyncClient):
 
         results = data['results']
         return results
+
+    def map_genre_ids_to_names(
+        self,
+        genre_ids,
+        genre_list,
+    ):
+        """
+        Utility function to map genre id list to genre name list
+        """
+        mappings = dict()
+        for entry in genre_list:
+            key = entry.get('id')
+            val = entry.get('name')
+            mappings[key] = val
         
+        genres = []
+        for id in genre_ids:
+            genre = mappings.get(id)
+            if genre is not None:
+                genres.append(genre)
+        
+        return genres
+            
+    def map_language_code_to_name(
+        self,
+        language_code,
+        language_list,
+    ):
+        """
+        Utility function to map language iso_639_1 to english name
+        """
+        mappings = dict()
+        for entry in language_list:
+            key = entry.get('iso_639_1')
+            val = entry.get('english_name')
+            mappings[key] = val
+        
+        language = mappings.get(language_code, None)
+        return language
+            
