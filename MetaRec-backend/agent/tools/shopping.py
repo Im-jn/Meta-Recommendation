@@ -5,7 +5,15 @@ async def search_products_amazon(
     results = await ctx.serpapi.search_amazon(query)
     items = []
     for result in results:
-        items.append(result['title'])
+        extracted = {
+            'title': result.get('title'),
+            'brand': result.get('brand'),
+            'link': result.get('link_clean'),
+            'rating': result.get('rating'),
+            'reviews': result.get('reviews'),
+            'thumbnail': result.get('thumbnail'),
+        }
+        items.append(extracted)
     return items
 
     
