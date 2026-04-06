@@ -25,6 +25,8 @@ class BaseAsyncClient:
             *args, 
             **kwargs,
             policy=SpecificationPolicy(
+                # cache requests for development purposes to reduce API usage
+                # TODO: caching for production?
                 cache_options=CacheOptions(
                     shared=True,
                     allow_stale=True,
