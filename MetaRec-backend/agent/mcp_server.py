@@ -89,6 +89,21 @@ async def search_movies_by_genres(
     return results
 
 @mcp.tool(
+    name="search.tv_series_by_genres",
+)
+async def search_tv_by_genres(
+        with_genres: Optional[str]=None,
+        without_genres: Optional[str]=None,
+    ) -> list[dict]:
+    """ Search (discover) TV series by their TMDB genre ids. """
+    results = await tools.entertainment.search_tv_by_genres(
+        with_genres,
+        without_genres,
+        ctx
+    )
+    return results
+
+@mcp.tool(
     name="search.tv_series_by_title",
 )
 async def search_tv_by_title(
@@ -147,8 +162,9 @@ if __name__ == '__main__':
 
             #res = await client.call_tool('search.movies_by_title', {'query': 'jaws'})
             #res = await client.call_tool('search.tv_series_by_title', {'query': 'jaws'})
-
-            res = await client.call_tool('search.movies_by_genres', {'with_genres': '99'})
+            
+            #res = await client.call_tool('search.movies_by_genres', {'with_genres': '99'})
+            res = await client.call_tool('search.tv_series_by_genres', {'with_genres': '99'})
 
             text = res.content[0].text
             data = json.loads(text)
