@@ -6,6 +6,7 @@ class TMDBClient(BaseAsyncClient):
     def __init__(
         self,
         token: Optional[str]=None,
+        language: str='en',
     ):
         headers = {
             'Authorization': f'Bearer {token}',
@@ -15,11 +16,13 @@ class TMDBClient(BaseAsyncClient):
             base_url='https://api.themoviedb.org',
             headers=headers,
         )
+        
+        self.language = 'en'
     
     async def list_movie_genres(self):
         """ Retrieve id-genre name mappings for movies listed on TMDB. """
         params = {
-            'language': 'en',
+            'language': self.language,
         }
         resp = await self.client.get('/3/genre/movie/list', params=params)
         resp.raise_for_status()
@@ -29,7 +32,7 @@ class TMDBClient(BaseAsyncClient):
     async def list_tv_genres(self):
         """ Retrieve id-genre name mappings for tv series listed on TMDB. """
         params = {
-            'language': 'en',
+            'language': self.language,
         }
         resp = await self.client.get('/3/genre/tv/list', params=params)
         resp.raise_for_status()
@@ -53,7 +56,9 @@ class TMDBClient(BaseAsyncClient):
     async def search_movie_by_filter(
         self,
         with_cast: Optional[str],
+        without_cast: Optional[str],
         with_genres: Optional[str],
+        without_genres: Optional[str],
     ):
         params = {}
         
