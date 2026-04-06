@@ -5,6 +5,7 @@ from providers.tikhub.client import TikHubClient
 from providers.discogs.client import DiscogsClient
 from providers.serpapi.client import SerpapiClient
 from providers.hardcover.client import HardCoverClient
+from providers.coverartarchive.client import CoverArtArchiveClient
 
 class ClientContext:
     def __init__(self):
@@ -18,6 +19,7 @@ class ClientContext:
         # entertainment/music
         # no auth required
         self.musicbrainz = MusicBrainzClient()
+        self.coverartarchive = CoverArtArchiveClient()
 
         # entertainment/music
         # no auth required, but providing auth allows higher rate limit
