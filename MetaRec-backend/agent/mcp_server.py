@@ -6,6 +6,7 @@ import tools.restaurants
 import tools.entertainment
 import tools.shopping
 
+# load environment variables
 dotenv.load_dotenv(dotenv.find_dotenv())
 mcp = FastMCP()
 ctx = ClientContext()
@@ -16,9 +17,19 @@ ctx = ClientContext()
 )
 async def search_restaurants_google(
         query:str,
-    ) -> list[str]:
+    ) -> list[dict]:
     """ Search for restaurants using Google Maps. """
     results = await tools.restaurants.search_restaurants_google(query, ctx)
+    return results
+
+@mcp.tool(
+    name="search.restaurants.xhs",
+)
+async def search_restaurants_xhs(
+        query:str,
+    ) -> list[any]:
+    """ Search for restaurants using XiaoHongShu. """
+    results = await tools.restaurants.search_restaurants_xiaohongshu(query, ctx)
     return results
 
 @mcp.tool(
@@ -27,7 +38,7 @@ async def search_restaurants_google(
 async def search_restaurants_yelp(
         query: str,
         location: Annotated[str, 'Location'],
-    ) -> list[str]:
+    ) -> list[any]:
     """ Search for restaurants using Yelp. """
     results = await tools.restaurants.search_restaurants_yelp(query, location, ctx)
     return results
@@ -37,8 +48,8 @@ async def search_restaurants_yelp(
 )
 async def search_books(
         query: str,
-    ) -> list[str]:
-    """ Search for books (using HardCover). """
+    ) -> list[dict]:
+    """ Search for books by genre. """
     results = await tools.entertainment.search_books(query, ctx)
     return results
 
@@ -47,7 +58,7 @@ async def search_books(
 )
 async def search_music(
         query: str,
-    ) -> list[str]:
+    ) -> list[dict]:
     """ Search for music (using MusicBrainz). """
     results = await tools.entertainment.search_music(query, ctx)
     return results
@@ -77,7 +88,7 @@ async def search_tv_by_title(
 )
 async def search_products_amazon(
         query: str,
-    ) -> list[str]:
+    ) -> list[dict]:
     """ Search for products on Amazon. """
     results = await tools.shopping.search_products_amazon(query, ctx)
     return results
@@ -85,11 +96,18 @@ async def search_products_amazon(
 if __name__ == '__main__':
     from fastmcp import Client
     import asyncio
-    
+    import json
     
     async def main():
+        ''' 
+        WIP: testing tools
+        '''
+
         client = Client(mcp)
+
         async with client:
+
+            print(str(client.session))
             tools = await client.list_tools()
             print("\n--- MCP Server Tools ---")
             for tool in tools:
@@ -99,7 +117,23 @@ if __name__ == '__main__':
                 print(f"Outputs: {tool.outputSchema}")
                 print("-" * 20)
             
+            # doesnt work, api requires payment
+            #res = await client.call_tool('search.restaurants.xhs', {'query': 'sichuan food Singapore, Chinatown'})
+            
             #res = await client.call_tool('search.restaurants.google', {'query': 'sichuan food'})
-            res = await client.call_tool('search.products.amazon', {'query': 'nintendo switch'})
-            print(res)
+
+            #res = await client.call_tool('search.products.amazon', {'query': 'nintendo switch'})
+
+            #res = await client.call_tool('search.restaurants.yelp', {'query': 'sichuan food', 'location': 'Singapore, Chinatown'})
+            
+            #res = await client.call_tool('search.books', {'query': 'Science Fiction'})
+            
+            res = await client.call_tool('search.music', {'query': 'tag:rock'})
+
+
+            text = res.content[0].text
+            data = json.loads(text)
+            output = json.dumps(data, indent=2)
+            print(output)
+
     asyncio.run(main())
