@@ -822,12 +822,11 @@ class MetaRecService:
                 # 生成确认消息
                 message = await generate_confirmation_message(
                     self.async_client, 
-                    self.llm_model, 
                     query, 
                     preferences, 
-                    language, 
-                    user_profile, 
-                    guide_missing_preferences,
+                    language=language, 
+                    user_profile=user_profile, 
+                    guide_missing_preferences=guide_missing_preferences,
                     model=self.llm_model,
                 )
             except Exception as e:
@@ -2323,5 +2322,4 @@ def create_service(
             llm_model,
             restaurant_data
     )
-
 
