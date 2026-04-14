@@ -440,7 +440,13 @@ async def process_user_request_stream(query_data: Dict[str, Any]):
         async def generate_stream():
             """生成流式响应"""
             try:
-                async for chunk in stream_llm_response(query, conversation_history):
+                stream_kwargs = {
+                    "conversation_history": conversation_history
+                }
+                if llm_model:
+                    stream_kwargs["model"] = llm_model
+
+                async for chunk in stream_llm_response(async_client, query, **stream_kwargs):
                     # 发送 SSE 格式的数据
                     yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
                 
