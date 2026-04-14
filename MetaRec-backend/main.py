@@ -107,8 +107,8 @@ def load_preferences_from_storage(user_id: str, conversation_id: str) -> Optiona
     return None
 
 
-def get_conversation_preferences_cached(user_id: str, conversation_id: str) -> Dict[str, Any]:
-    """从内存缓存获取 preferences，如果不存在则从持久化层加载并缓存"""
+def get_conversation_preferences_cached(user_id: str, conversation_id: str) -> Optional[Dict[str, Any]]:
+    """从内存缓存获取 preferences，如果不存在则从持久化层加载并缓存；会话不存在时返回 None"""
     cache_key = get_cache_key(user_id, conversation_id)
     
     # 优先从内存缓存获取
@@ -120,9 +120,8 @@ def get_conversation_preferences_cached(user_id: str, conversation_id: str) -> D
     if preferences is not None:
         return preferences
     
-    # 如果持久化层也没有，返回空字典并初始化缓存
-    conversation_preferences_cache[cache_key] = {}
-    return {}
+    # 会话不存在
+    return None
 
 
 def update_conversation_preferences_cached(
@@ -886,6 +885,8 @@ async def update_conversation_preferences(
         
         # 从内存缓存获取更新后的 preferences
         updated_preferences = get_conversation_preferences_cached(user_id, conversation_id)
+        if updated_preferences is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
         return {"preferences": updated_preferences}
     except HTTPException:
         raise

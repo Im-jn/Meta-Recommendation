@@ -1813,11 +1813,12 @@ class MetaRecService:
                         }
                     else:
                         # LLM 说这是 query 但没有返回偏好，回退到规则匹配
-                        new_preferences = self.extract_preferences_from_query(query, user_id)
+                        new_preferences = self.extract_preferences_from_query(query, user_id, session_id)
                         confirmation = await self.create_confirmation_request(
                             original_query,
                             new_preferences,
                             user_id,
+                            session_id,
                             use_llm=True,
                             guide_missing_preferences=False
                         )
@@ -2322,4 +2323,3 @@ def create_service(
             llm_model,
             restaurant_data
     )
-
