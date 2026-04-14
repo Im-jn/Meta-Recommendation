@@ -43,6 +43,77 @@ def detect_language(text: str) -> str:
     return "en"
 
 
+def is_recommendation_request(text: str) -> bool:
+    """
+    判断用户是否明确在请求餐厅推荐。
+    规则偏保守：宁可判为 chat，也避免把普通闲聊误判为推荐请求。
+    """
+    if not text or not isinstance(text, str):
+        return False
+
+    t = text.strip()
+    if not t:
+        return False
+
+    language = detect_language(t)
+    t_lower = t.lower()
+
+    if language == "zh":
+        # 直接表达推荐/找餐厅诉求
+        if re.search(r"(推荐|帮我推荐|帮我找|哪里吃|吃什么|想吃)", t):
+            return True
+        # 同时出现餐饮主题词 + 请求动作词
+        has_food_topic = re.search(r"(餐厅|美食|火锅|川菜|寿司|烤肉|咖啡|晚餐|午餐|早餐)", t)
+        has_request_intent = re.search(r"(想|要|找|推荐|哪里|吃)", t)
+        return bool(has_food_topic and has_request_intent)
+
+    # English
+    if re.search(r"\b(recommend|suggest|restaurant|restaurants|cuisine|where\s+to\s+eat|what\s+to\s+eat|looking\s+for)\b", t_lower):
+        return True
+
+    if re.search(r"\b(i\s+want|i\s+need|i'm\s+craving|help\s+me\s+find)\b", t_lower) and re.search(
+        r"\b(food|eat|dinner|lunch|breakfast|brunch)\b", t_lower
+    ):
+        return True
+
+    return False
+
+
+def has_meaningful_preferences(preferences: Optional[Dict[str, Any]]) -> bool:
+    """
+    判断 preferences 是否包含可用于推荐的有效信息。
+    仅用于 LLM 意图的语义后处理，不做关键词检索。
+    """
+    if not preferences or not isinstance(preferences, dict):
+        return False
+
+    restaurant_types = preferences.get("restaurant_types", [])
+    if isinstance(restaurant_types, list) and any(t and t != "any" for t in restaurant_types):
+        return True
+
+    flavor_profiles = preferences.get("flavor_profiles", [])
+    if isinstance(flavor_profiles, list) and any(f and f != "any" for f in flavor_profiles):
+        return True
+
+    dining_purpose = preferences.get("dining_purpose", "any")
+    if dining_purpose and dining_purpose != "any":
+        return True
+
+    location = preferences.get("location", "any")
+    if location and location != "any":
+        return True
+
+    budget = preferences.get("budget_range", {})
+    if isinstance(budget, dict):
+        budget_min = budget.get("min")
+        budget_max = budget.get("max")
+        # 默认预算 20-60 视为信息量较低
+        if (budget_min, budget_max) not in [(20, 60), (None, None)]:
+            return True
+
+    return False
+
+
 def get_system_prompt(
     language: str = "en", 
     user_profile: Optional[Dict[str, Any]] = None,
@@ -132,7 +203,7 @@ Profile updates: demographics only age_range/gender/occupation/location/national
 JSON格式:
 {{"intent":"confirmation_yes|confirmation_no|query|chat", "reply":"回复", "confidence":0.0-1.0, "preferences":{{"restaurant_types":["casual"]或["any"], "flavor_profiles":["spicy"]或["any"], "dining_purpose":"date-night|family|friends|business|solo|any", "budget_range":{{"min":20,"max":60,"currency":"SGD","per":"person"}}, "location":"Chinatown"或"any"}}, "profile_updates":{{"demographics":{{}}, "dining_habits":{{}}}}}}
 
-规则: preferences仅在intent为"query"或"confirmation_no"(有新偏好)时提供; "confirmation_yes"和"chat"时preferences为null; profile_updates可选,仅推断新信息时提供,严格遵循字段规则
+规则: 只有在用户明确提出餐厅推荐/修改推荐条件时才用"query"; 普通闲聊/问候/感谢一律用"chat"; preferences仅在intent为"query"或"confirmation_no"(有新偏好)时提供; "confirmation_yes"和"chat"时preferences为null; profile_updates可选,仅推断新信息时提供,严格遵循字段规则; 当intent为"chat"时先正常对话,并可轻量询问是否需要推荐(例如口味/预算/位置)
 {profile_context}
 回复使用中文"""
         else:
@@ -147,7 +218,7 @@ Analyze intent and return JSON:
 JSON format:
 {{"intent":"confirmation_yes|confirmation_no|query|chat", "reply":"reply", "confidence":0.0-1.0, "preferences":{{"restaurant_types":["casual"]or["any"], "flavor_profiles":["spicy"]or["any"], "dining_purpose":"date-night|family|friends|business|solo|any", "budget_range":{{"min":20,"max":60,"currency":"SGD","per":"person"}}, "location":"Chinatown"or"any"}}, "profile_updates":{{"demographics":{{}}, "dining_habits":{{}}}}}}
 
-Rules: preferences only when intent is "query" or "confirmation_no"(with new prefs); null for "confirmation_yes" and "chat"; profile_updates optional, only when inferring new info, follow field rules strictly
+Rules: use "query" only when user explicitly asks for recommendations or changes recommendation criteria; greetings/small talk/thanks should be "chat"; preferences only when intent is "query" or "confirmation_no"(with new prefs); null for "confirmation_yes" and "chat"; profile_updates optional, only when inferring new info, follow field rules strictly; when intent is "chat", reply naturally and optionally ask whether user wants recommendations (taste/budget/location)
 {profile_context}
 Use English for replies"""
     else:
@@ -160,7 +231,7 @@ Use English for replies"""
 JSON格式:
 {{"intent":"query|chat", "reply":"回复", "confidence":0.0-1.0, "preferences":{{"restaurant_types":["casual","fine-dining","fast-casual","street-food","buffet","cafe"]或["any"], "flavor_profiles":["spicy","savory","sweet","sour","mild"]或["any"], "dining_purpose":"date-night|family|friends|business|solo|celebration|any", "budget_range":{{"min":20,"max":60,"currency":"SGD"}}, "location":"Chinatown"或"any"}}, "profile_updates":{{"demographics":{{}}, "dining_habits":{{}}}}}}
 
-规则: preferences仅在"query"时提供,"chat"时为null; profile_updates可选,仅推断新信息时提供,严格遵循字段规则; budget_range未提及则默认20-60 SGD; location未提及则"any"
+规则: 仅当用户明确提出想要餐厅推荐时才标记为"query"; 普通闲聊/问候/感谢默认"chat"; preferences仅在"query"时提供,"chat"时为null; profile_updates可选,仅推断新信息时提供,严格遵循字段规则; budget_range未提及则默认20-60 SGD; location未提及则"any"; 当intent为"chat"时可轻量询问是否需要推荐(口味/预算/位置)
 {profile_context}
 回复使用中文"""
         else:
@@ -171,7 +242,7 @@ JSON格式:
 JSON format:
 {{"intent":"query|chat", "reply":"reply", "confidence":0.0-1.0, "preferences":{{"restaurant_types":["casual","fine-dining","fast-casual","street-food","buffet","cafe"]or["any"], "flavor_profiles":["spicy","savory","sweet","sour","mild"]or["any"], "dining_purpose":"date-night|family|friends|business|solo|celebration|any", "budget_range":{{"min":20,"max":60,"currency":"SGD"}}, "location":"Chinatown"or"any"}}, "profile_updates":{{"demographics":{{}}, "dining_habits":{{}}}}}}
 
-Rules: preferences only when "query", null for "chat"; profile_updates optional, only when inferring new info, follow field rules strictly; budget_range default 20-60 SGD if not mentioned; location default "any" if not mentioned
+Rules: mark as "query" only when user explicitly asks for restaurant recommendations; greetings/small talk/thanks should be "chat"; preferences only when "query", null for "chat"; profile_updates optional, only when inferring new info, follow field rules strictly; budget_range default 20-60 SGD if not mentioned; location default "any" if not mentioned; when intent is "chat", reply naturally and optionally ask whether the user wants recommendations (taste/budget/location)
 {profile_context}
 Use English for replies"""
 
@@ -273,6 +344,12 @@ async def analyze_user_message(
             result = json.loads(content)
             # 验证并返回
             intent = result.get("intent", "chat")
+            raw_confidence = result.get("confidence", 0.8)
+            try:
+                confidence = float(raw_confidence)
+            except (TypeError, ValueError):
+                confidence = 0.8
+            confidence = max(0.0, min(1.0, confidence))
             # 根据当前状态验证意图
             if is_in_query_flow:
                 # 在 query 流程中，允许的意图
@@ -303,6 +380,19 @@ async def analyze_user_message(
                         "location": preferences.get("location", "any")
                     }
                     preferences = validated_prefs
+
+            # 起始状态下的语义后处理：
+            # 由 LLM 的 intent + confidence + preferences 信息量共同决定是否进入推荐流程。
+            if not is_in_query_flow and intent == "query":
+                prefs_meaningful = has_meaningful_preferences(preferences)
+                # 低置信度，且没有明确偏好时，视为普通聊天
+                if confidence < 0.6 and not prefs_meaningful:
+                    intent = "chat"
+                    preferences = None
+                # 中等置信度，但偏好信息为空洞，也降级为聊天
+                elif confidence < 0.75 and not prefs_meaningful:
+                    intent = "chat"
+                    preferences = None
             
             # 提取用户画像更新信息
             profile_updates = None
@@ -321,30 +411,57 @@ async def analyze_user_message(
                         profile_updates = None
             
             default_reply = "Sorry, I didn't understand your question." if language == "en" else "抱歉，我没有理解您的问题。"
+            reply_text = result.get("reply", default_reply)
+            if intent == "chat":
+                if language == "zh":
+                    if "推荐" not in reply_text:
+                        reply_text = f"{reply_text}\n\n如果你愿意，我也可以按口味、预算和位置给你做餐厅推荐。"
+                else:
+                    if "recommend" not in reply_text.lower():
+                        reply_text = f"{reply_text}\n\nIf you want, I can also recommend restaurants by taste, budget, and location."
             return LLMResponse(
                 intent=intent,
-                reply=result.get("reply", default_reply),
-                confidence=float(result.get("confidence", 0.8)),
+                reply=reply_text,
+                confidence=confidence,
                 preferences=preferences,
                 profile_updates=profile_updates
             )
         except json.JSONDecodeError:
             # 如果不是 JSON 格式，尝试从文本中提取意图
-            content_lower = content.lower()
-            # 简单的意图判断（支持中英文关键词）
-            if language == "zh":
-                query_keywords = ["推荐", "餐厅", "吃饭", "美食", "找", "想吃", "推荐一下"]
-            else:
-                query_keywords = ["recommend", "restaurant", "food", "dining", "find", "looking for", "want", "eat"]
-            is_query = any(keyword in content_lower for keyword in query_keywords)
+            is_query = is_recommendation_request(message)
+
+            # 在确认流程中，优先识别 yes/no，避免普通聊天误触发推荐流程
+            fallback_intent = "query" if is_query else "chat"
+            if is_in_query_flow:
+                msg_lower = message.lower().strip()
+                is_yes = bool(re.search(r"\b(yes|yeah|yep|yup|correct|right|ok|okay|sure|exactly)\b", msg_lower)) or any(
+                    token in message for token in ["是", "对", "好的", "可以", "没错", "正确"]
+                )
+                is_no = bool(re.search(r"\b(no|nope|wrong|incorrect|not right|not correct)\b", msg_lower)) or any(
+                    token in message for token in ["不", "不是", "不对", "不太对", "不正确"]
+                )
+
+                if is_yes and not is_no:
+                    fallback_intent = "confirmation_yes"
+                elif is_no:
+                    fallback_intent = "confirmation_no"
             
             # 如果不是 query，preferences 为 None
             preferences = None
+
+            reply_text = content
+            if fallback_intent == "chat":
+                if language == "zh":
+                    if "推荐" not in reply_text:
+                        reply_text = f"{reply_text}\n\n如果你愿意，我也可以按口味、预算和位置给你做餐厅推荐。"
+                else:
+                    if "recommend" not in reply_text.lower():
+                        reply_text = f"{reply_text}\n\nIf you want, I can also recommend restaurants by taste, budget, and location."
             
             return LLMResponse(
-                intent="query" if is_query else "chat",
-                reply=content,  # 直接使用模型返回的内容
-                confidence=0.7 if is_query else 0.8,
+                intent=fallback_intent,
+                reply=reply_text,  # 直接使用模型返回的内容（chat 场景补充轻量引导）
+                confidence=0.7 if fallback_intent == "query" else 0.8,
                 preferences=preferences,
                 profile_updates=None
             )
@@ -698,4 +815,3 @@ async def stream_llm_response(
         error_msg = "Sorry, the service is temporarily unavailable. Please try again later." if language == "en" else "抱歉，服务暂时不可用，请稍后再试。"
         for char in error_msg:
             yield char
-
