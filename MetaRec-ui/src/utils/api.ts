@@ -1,4 +1,25 @@
-import type { RecommendationResponse, TaskStatus, ConversationSummary, Conversation, ConversationMessage } from './types'
+import type {
+  Conversation,
+  ConversationSummary,
+  GenericSuccessResponse,
+  HealthResponse,
+  PreferencesResponse,
+  RecommendationResponse,
+  TaskStatus,
+  UpdatePreferencesResponse,
+} from '../contracts/api-types'
+import {
+  ConversationSchema,
+  ConversationSummarySchema,
+  GenericSuccessResponseSchema,
+  HealthResponseSchema,
+  PreferencesResponseSchema,
+  RecommendationResponseSchema,
+  TaskStatusSchema,
+  parseWithContract,
+  UpdatePreferencesResponseSchema,
+  UserPreferencesResponseSchema,
+} from '../contracts/runtime-schemas'
 
 // 智能检测环境：生产环境使用相对路径（前后端同域），开发环境使用localhost
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || 
@@ -50,7 +71,11 @@ export async function recommend(
       throw new Error(errorMessage)
     }
     
-    const response = (await res.json()) as RecommendationResponse
+    const response = parseWithContract(
+      RecommendationResponseSchema,
+      await res.json(),
+      '/api/process',
+    )
     console.log('[API] recommend response:', {
       hasLlmReply: !!response.llm_reply,
       hasConfirmationRequest: !!response.confirmation_request,
@@ -198,7 +223,11 @@ export async function getTaskStatus(
       })
       throw new Error(errorMessage)
     }
-    const status = (await res.json()) as TaskStatus
+    const status = parseWithContract(
+      TaskStatusSchema,
+      await res.json(),
+      '/api/status/{task_id}',
+    )
     console.log('[API] getTaskStatus response:', {
       taskId,
       status: status.status,
@@ -220,14 +249,14 @@ export async function getTaskStatus(
 }
 
 // 健康检查 - 用于测试后端连接
-export async function healthCheck(): Promise<{ status: string; timestamp: string }> {
+export async function healthCheck(): Promise<HealthResponse> {
   const url = `${BASE_URL}/health`
   try {
     const res = await fetch(url)
     if (!res.ok) {
       throw new Error(`Health check failed: ${res.status} ${res.statusText}`)
     }
-    return (await res.json()) as { status: string; timestamp: string }
+    return parseWithContract(HealthResponseSchema, await res.json(), '/health')
   } catch (error: any) {
     if (error instanceof TypeError && error.message.includes('fetch')) {
       throw new Error(`Cannot connect to backend at ${BASE_URL}. Please ensure the backend server is running on port 8000.`)
@@ -237,7 +266,7 @@ export async function healthCheck(): Promise<{ status: string; timestamp: string
 }
 
 // 更新偏好设置
-export async function updatePreferences(preferences: Record<string, any>): Promise<{ preferences: Record<string, any> }> {
+export async function updatePreferences(preferences: Record<string, any>): Promise<UpdatePreferencesResponse> {
   const url = `${BASE_URL}/api/update-preferences`
   const res = await fetch(url, {
     method: 'POST',
@@ -248,32 +277,44 @@ export async function updatePreferences(preferences: Record<string, any>): Promi
     const text = await res.text().catch(() => '')
     throw new Error(`HTTP ${res.status} ${res.statusText} ${text}`)
   }
-  return (await res.json()) as { preferences: Record<string, any> }
+  return parseWithContract(
+    UpdatePreferencesResponseSchema,
+    await res.json(),
+    '/api/update-preferences',
+  )
 }
 
 // 获取用户偏好设置
-export async function getUserPreferences(userId: string = "default"): Promise<{ preferences: Record<string, any> }> {
+export async function getUserPreferences(userId: string = "default"): Promise<{ user_id: string; preferences: Record<string, any> }> {
   const url = `${BASE_URL}/api/user-preferences/${userId}`
   const res = await fetch(url)
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     throw new Error(`HTTP ${res.status} ${res.statusText} ${text}`)
   }
-  return (await res.json()) as { preferences: Record<string, any> }
+  return parseWithContract(
+    UserPreferencesResponseSchema,
+    await res.json(),
+    '/api/user-preferences/{user_id}',
+  )
 }
 
 // 获取对话的偏好设置
 export async function getConversationPreferences(
   userId: string,
   conversationId: string
-): Promise<{ preferences: Record<string, any> }> {
+): Promise<PreferencesResponse> {
   const url = `${BASE_URL}/api/conversations/${userId}/${conversationId}/preferences`
   const res = await fetch(url)
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     throw new Error(`HTTP ${res.status} ${res.statusText} ${text}`)
   }
-  return (await res.json()) as { preferences: Record<string, any> }
+  return parseWithContract(
+    PreferencesResponseSchema,
+    await res.json(),
+    '/api/conversations/{user_id}/{conversation_id}/preferences',
+  )
 }
 
 // 更新对话的偏好设置
@@ -281,7 +322,7 @@ export async function updateConversationPreferences(
   userId: string,
   conversationId: string,
   preferences: Record<string, any>
-): Promise<{ preferences: Record<string, any> }> {
+): Promise<PreferencesResponse> {
   const url = `${BASE_URL}/api/conversations/${userId}/${conversationId}/preferences`
   const res = await fetch(url, {
     method: 'PUT',
@@ -292,7 +333,11 @@ export async function updateConversationPreferences(
     const text = await res.text().catch(() => '')
     throw new Error(`HTTP ${res.status} ${res.statusText} ${text}`)
   }
-  return (await res.json()) as { preferences: Record<string, any> }
+  return parseWithContract(
+    PreferencesResponseSchema,
+    await res.json(),
+    '/api/conversations/{user_id}/{conversation_id}/preferences',
+  )
 }
 
 // ==================== 对话历史API ====================
@@ -314,7 +359,12 @@ export async function getConversations(userId: string): Promise<ConversationSumm
       }
       throw new Error(errorMessage)
     }
-    return (await res.json()) as ConversationSummary[]
+    const data = await res.json()
+    return parseWithContract(
+      ConversationSummarySchema.array(),
+      data,
+      '/api/conversations/{user_id}',
+    )
   } catch (error: any) {
     if (error instanceof TypeError && error.message.includes('fetch')) {
       throw new Error(`Network error: Cannot connect to backend at ${BASE_URL}`)
@@ -340,7 +390,11 @@ export async function getConversation(userId: string, conversationId: string): P
       }
       throw new Error(errorMessage)
     }
-    return (await res.json()) as Conversation
+    return parseWithContract(
+      ConversationSchema,
+      await res.json(),
+      '/api/conversations/{user_id}/{conversation_id}',
+    )
   } catch (error: any) {
     if (error instanceof TypeError && error.message.includes('fetch')) {
       throw new Error(`Network error: Cannot connect to backend at ${BASE_URL}`)
@@ -378,7 +432,11 @@ export async function createConversation(
       throw new Error(errorMessage)
     }
     
-    return (await res.json()) as Conversation
+    return parseWithContract(
+      ConversationSchema,
+      await res.json(),
+      '/api/conversations/{user_id}',
+    )
   } catch (error: any) {
     if (error instanceof TypeError && error.message.includes('fetch')) {
       throw new Error(`Network error: Cannot connect to backend at ${BASE_URL}`)
@@ -414,7 +472,11 @@ export async function updateConversation(
       throw new Error(errorMessage)
     }
     
-    return (await res.json()) as Conversation
+    return parseWithContract(
+      ConversationSchema,
+      await res.json(),
+      '/api/conversations/{user_id}/{conversation_id}',
+    )
   } catch (error: any) {
     if (error instanceof TypeError && error.message.includes('fetch')) {
       throw new Error(`Network error: Cannot connect to backend at ${BASE_URL}`)
@@ -430,7 +492,7 @@ export async function addMessage(
   role: 'user' | 'assistant',
   content: string,
   metadata?: Record<string, any>
-): Promise<{ success: boolean; message: string }> {
+): Promise<GenericSuccessResponse> {
   const url = `${BASE_URL}/api/conversations/${userId}/${conversationId}/messages`
   
   try {
@@ -456,7 +518,11 @@ export async function addMessage(
       throw new Error(errorMessage)
     }
     
-    return (await res.json()) as { success: boolean; message: string }
+    return parseWithContract(
+      GenericSuccessResponseSchema,
+      await res.json(),
+      '/api/conversations/{user_id}/{conversation_id}/messages',
+    )
   } catch (error: any) {
     if (error instanceof TypeError && error.message.includes('fetch')) {
       throw new Error(`Network error: Cannot connect to backend at ${BASE_URL}`)
@@ -469,7 +535,7 @@ export async function addMessage(
 export async function deleteConversation(
   userId: string,
   conversationId: string
-): Promise<{ success: boolean; message: string }> {
+): Promise<GenericSuccessResponse> {
   const url = `${BASE_URL}/api/conversations/${userId}/${conversationId}`
   
   try {
@@ -489,7 +555,11 @@ export async function deleteConversation(
       throw new Error(errorMessage)
     }
     
-    return (await res.json()) as { success: boolean; message: string }
+    return parseWithContract(
+      GenericSuccessResponseSchema,
+      await res.json(),
+      '/api/conversations/{user_id}/{conversation_id}',
+    )
   } catch (error: any) {
     if (error instanceof TypeError && error.message.includes('fetch')) {
       throw new Error(`Network error: Cannot connect to backend at ${BASE_URL}`)
@@ -497,6 +567,4 @@ export async function deleteConversation(
     throw error
   }
 }
-
-
 
