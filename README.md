@@ -161,8 +161,73 @@ To enable map functionality, you need to configure a Google Maps API key:
 ### Local vs Production
 
 The application automatically detects the environment:
-- **Development**: Frontend uses `http://localhost:8000` for API
+- **Development**: Frontend uses `http://localhost:8000` for API, dev dependencies for local testing
 - **Production**: Frontend uses relative URLs (same domain as backend)
+
+## 📝 Automated Test Pipeline
+
+Multi-part automated testing pipeline (no Playwright E2E yet, that'll be too heavy for now) v1:
+
+1. Frontend unit tests
+2. Frontend rendering tests
+3. Backend unit tests
+4. Backend chain tests - `standard` (mock LLM returns valid output at first attempt)
+5. Backend chain tests - `retrial` (mock LLM fails once, then succeeds)
+6. Backend chain tests - `fallback` (mock LLM keeps failing, bounded by high retry cap)
+
+### Frontend
+
+```bash
+cd MetaRec-ui
+npm run test:unit
+npm run test:render
+```
+
+Run all frontend tests:
+
+```bash
+npm test
+```
+
+### Backend
+
+Install dev test dependencies:
+
+```bash
+cd MetaRec-backend
+python -m pip install -r requirements-dev.txt
+```
+
+Run each backend category:
+
+```bash
+python -m pytest -q -m backend_unit
+python -m pytest -q -m chain_standard
+python -m pytest -q -m chain_retrial
+python -m pytest -q -m chain_fallback
+```
+
+Pytest runtime temp files are redirected to:
+`MetaRec-backend/__pytest_runtime__/`
+
+Run all backend categories together:
+
+```bash
+python -m pytest -q -m "backend_unit or chain_standard or chain_retrial or chain_fallback"
+```
+
+### GitHub Actions CI (6-way split + reports)
+
+CI workflow file: `.github/workflows/tests.yml`
+
+- `frontend_unit`
+- `frontend_render`
+- `backend_unit`
+- `backend_chain_standard`
+- `backend_chain_retrial`
+- `backend_chain_fallback`
+
+Each job emits a JUnit XML report artifact (`*-junit`), and a final `Test Report` job publishes a merged PR test summary from all XML files.
 
 ## 📄 License
 

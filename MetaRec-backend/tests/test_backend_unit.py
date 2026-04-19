@@ -1,0 +1,55 @@
+import pytest
+
+from llm_service import analyze_user_message
+from service import MetaRecService
+
+from conftest import FakeAsyncClient, query_intent_json
+
+
+@pytest.mark.backend_unit
+@pytest.mark.asyncio
+async def test_analyze_user_message_parses_structured_json():
+    client = FakeAsyncClient([query_intent_json("I'll help you find spicy restaurants.")])
+    result = await analyze_user_message(
+        client=client,
+        message="Find spicy casual places in Chinatown",
+        model="fake-model",
+        max_format_retries=0,
+    )
+
+    assert result.intent == "query"
+    assert result.preferences is not None
+    assert result.preferences["restaurant_types"] == ["casual"]
+    assert result.preferences["location"] == "Chinatown"
+    assert "spicy" in result.preferences["flavor_profiles"]
+
+
+@pytest.mark.backend_unit
+def test_normalize_profile_updates_keeps_supported_fields_and_merges_unknown_to_description():
+    raw = {
+        "demographics": {"age_range": ["26-35"], "hobby": "hiking"},
+        "dining_habits": {"dietary_restrictions": ["vegetarian", "halal"], "unknown_field": "late-night"},
+    }
+    normalized = MetaRecService._normalize_profile_updates(raw)
+
+    assert normalized["demographics"]["age_range"] == "26-35"
+    assert "unknown_field: late-night" in normalized["dining_habits"]["description"]
+    assert normalized["dining_habits"]["dietary_restrictions"] == "vegetarian, halal"
+
+
+@pytest.mark.backend_unit
+def test_extract_restaurants_from_summary_string():
+    data = {
+        "summary": (
+            '{"recommendations":[{"name":"Mock Bistro","area":"Chinatown","cuisine":"Sichuan",'
+            '"price_per_person_sgd":"20-30","flavor_match":["Spicy"],"purpose_match":["Friends"],'
+            '"why":"Great fit","sources":{"google_maps":"place-1"}}]}'
+        ),
+        "executions": [],
+    }
+
+    restaurants = MetaRecService._extract_restaurants_from_execution_data(data)
+
+    assert len(restaurants) == 1
+    assert restaurants[0]["name"] == "Mock Bistro"
+    assert restaurants[0]["sources"] == {"google_maps": "place-1"}

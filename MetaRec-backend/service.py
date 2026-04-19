@@ -128,6 +128,10 @@ class MetaRecService:
         self.summary_model = summary_model
         self.planning_model = planning_model
         self.llm_model = llm_model
+        try:
+            self.llm_max_format_retries = max(0, min(int(os.getenv("LLM_MAX_FORMAT_RETRIES", "2")), 50))
+        except ValueError:
+            self.llm_max_format_retries = 2
     
     def _get_session_key(self, user_id: str, session_id: Optional[str] = None) -> str:
         """
@@ -822,13 +826,13 @@ class MetaRecService:
                 # 生成确认消息
                 message = await generate_confirmation_message(
                     self.async_client, 
-                    self.llm_model, 
                     query, 
                     preferences, 
                     language, 
                     user_profile, 
                     guide_missing_preferences,
                     model=self.llm_model,
+                    max_text_retries=self.llm_max_format_retries,
                 )
             except Exception as e:
                 print(f"Error generating LLM confirmation message, falling back to template: {e}")
@@ -1584,6 +1588,7 @@ class MetaRecService:
                 is_in_query_flow=is_in_query_flow,
                 pending_preferences=pending_preferences,
                 model=self.llm_model,
+                max_format_retries=self.llm_max_format_retries,
             )
             
             # Step 2.5: 更新用户画像（如果有新的画像信息）
@@ -1752,6 +1757,7 @@ class MetaRecService:
                                     language,
                                     user_profile_for_guidance,
                                     model=self.llm_model,
+                                    max_text_retries=self.llm_max_format_retries,
                                 )
                                 
                                 # 更新上下文中的确认消息
@@ -2042,7 +2048,13 @@ class MetaRecService:
                 
                 # 使用 LLM 分析用户回复
                 # analyze_user_message 会自动将 query 添加到消息列表的最后
-                llm_response = await analyze_user_message(self.async_client, query, enhanced_history, user_profile)
+                llm_response = await analyze_user_message(
+                    self.async_client,
+                    query,
+                    enhanced_history,
+                    user_profile,
+                    max_format_retries=self.llm_max_format_retries
+                )
                 
                 # 如果 LLM 检测到新的偏好信息（intent 为 query 且有 preferences）
                 if llm_response.intent == "query" and llm_response.preferences:
@@ -2149,7 +2161,8 @@ class MetaRecService:
                                 self.async_client,
                                 current_preferences,
                                 language,
-                                user_profile
+                                user_profile,
+                                max_text_retries=self.llm_max_format_retries
                             )
                             
                             # 更新上下文中的确认消息
@@ -2323,5 +2336,3 @@ def create_service(
             llm_model,
             restaurant_data
     )
-
-

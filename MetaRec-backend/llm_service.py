@@ -43,6 +43,52 @@ def detect_language(text: str) -> str:
     return "en"
 
 
+def _sanitize_retry_count(value: Optional[int], default: int = 2) -> int:
+    """规范化重试次数，避免负数与过大值"""
+    if value is None:
+        value = default
+    try:
+        retry_count = int(value)
+    except (TypeError, ValueError):
+        retry_count = default
+    return max(0, min(retry_count, 50))
+
+
+def _infer_intent_from_text(text: str, is_in_query_flow: bool) -> str:
+    """
+    使用规则在 LLM 格式失败时推断意图，作为兜底逻辑
+    """
+    lowered = (text or "").lower().strip()
+
+    yes_patterns = [
+        "yes", "yeah", "yep", "yup", "correct", "right", "sure", "ok", "okay",
+        "是", "对", "好的", "可以", "没错", "正确"
+    ]
+    no_patterns = [
+        "no", "nope", "wrong", "incorrect", "not right", "not correct",
+        "不", "不是", "不对", "错误", "不要"
+    ]
+    query_patterns = [
+        "recommend", "restaurant", "food", "dining", "eat", "find", "looking for",
+        "推荐", "餐厅", "美食", "吃", "找餐厅", "吃饭"
+    ]
+
+    has_yes = any(p in lowered for p in yes_patterns)
+    has_no = any(p in lowered for p in no_patterns)
+    has_query = any(p in lowered for p in query_patterns)
+
+    if is_in_query_flow:
+        if has_yes and not has_no:
+            return "confirmation_yes"
+        if has_no and not has_yes:
+            return "confirmation_no"
+        if has_query:
+            return "query"
+        return "chat"
+
+    return "query" if has_query else "chat"
+
+
 def get_system_prompt(
     language: str = "en", 
     user_profile: Optional[Dict[str, Any]] = None,
@@ -200,6 +246,7 @@ async def analyze_user_message(
     is_in_query_flow: bool = False,
     pending_preferences: Optional[Dict[str, Any]] = None,
     model: str = LLM_MODEL,
+    max_format_retries: Optional[int] = None,
 ) -> LLMResponse:
     """
     使用免费大模型 API（Groq 等）分析用户消息，返回意图和回复
@@ -243,55 +290,66 @@ async def analyze_user_message(
     # 添加当前用户消息
     messages.append({"role": "user", "content": message})
     
-    try:
-        # 调用免费大模型 API（Groq 等）
-        # 注意：某些模型可能不支持 response_format，需要处理
+    max_retries = _sanitize_retry_count(
+        max_format_retries,
+        default=int(os.getenv("LLM_MAX_FORMAT_RETRIES", "2"))
+    )
+    default_reply = "Sorry, I didn't understand your question." if language == "en" else "抱歉，我没有理解您的问题。"
+    strict_retry_prompt = (
+        "Your previous output was invalid. Reply with JSON object only and follow the exact schema."
+        if language == "en"
+        else "你上一条输出格式无效。请只返回 JSON 对象，并严格遵循既定字段格式。"
+    )
+
+    last_raw_content = ""
+    last_exception: Optional[Exception] = None
+
+    for attempt in range(max_retries + 1):
+        attempt_messages = list(messages)
+        if attempt > 0:
+            attempt_messages.append({"role": "system", "content": strict_retry_prompt})
+
         try:
-            response = await client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=0.7,
-                response_format={"type": "json_object"}  # 强制 JSON 格式
-            )
-        except Exception as e:
-            # 如果模型不支持 response_format，尝试不使用它
-            if "response_format" in str(e).lower():
-                print(f"Model doesn't support response_format, retrying without it: {e}")
+            # 调用免费大模型 API（Groq 等）
+            # 注意：某些模型可能不支持 response_format，需要处理
+            try:
                 response = await client.chat.completions.create(
                     model=model,
-                    messages=messages,
-                    temperature=0.7
+                    messages=attempt_messages,
+                    temperature=0.7,
+                    response_format={"type": "json_object"}  # 强制 JSON 格式
                 )
-            else:
-                raise
-        
-        # 解析响应
-        content = response.choices[0].message.content
-        
-        # 尝试解析 JSON
-        try:
+            except Exception as e:
+                if "response_format" in str(e).lower():
+                    print(f"Model doesn't support response_format, retrying without it: {e}")
+                    response = await client.chat.completions.create(
+                        model=model,
+                        messages=attempt_messages,
+                        temperature=0.7
+                    )
+                else:
+                    raise
+
+            content = response.choices[0].message.content or ""
+            last_raw_content = content
+
+            # 解析并验证 JSON
             result = json.loads(content)
-            # 验证并返回
-            intent = result.get("intent", "chat")
-            # 根据当前状态验证意图
-            if is_in_query_flow:
-                # 在 query 流程中，允许的意图
-                if intent not in ["confirmation_yes", "confirmation_no", "query", "chat"]:
-                    intent = "chat"  # 默认值
-            else:
-                # 起始状态，只允许 query 或 chat
-                if intent not in ["query", "chat"]:
-                    intent = "chat"  # 默认值
-            
-            # 提取偏好信息（当 intent 为 "query" 或 "confirmation_no"（且提供了新偏好）时）
+            if not isinstance(result, dict):
+                raise ValueError("LLM output JSON is not an object")
+
+            allowed_intents = ["confirmation_yes", "confirmation_no", "query", "chat"] if is_in_query_flow else ["query", "chat"]
+            intent = result.get("intent")
+            if not isinstance(intent, str) or intent not in allowed_intents:
+                raise ValueError(f"Invalid intent: {intent}")
+
+            # 提取偏好信息（当 intent 为 "query" 或 "confirmation_no"(且有新偏好)时）
             preferences = None
-            if (intent == "query" or (intent == "confirmation_no" and "preferences" in result and result.get("preferences"))) and "preferences" in result:
+            has_update_prefs = intent == "query" or (intent == "confirmation_no" and bool(result.get("preferences")))
+            if has_update_prefs and "preferences" in result:
                 preferences = result.get("preferences")
-                print(f"preferences: {preferences}")
-                # 验证偏好格式
                 if preferences and isinstance(preferences, dict):
-                    # 确保所有必需字段存在
-                    validated_prefs = {
+                    preferences = {
                         "restaurant_types": preferences.get("restaurant_types", ["any"]),
                         "flavor_profiles": preferences.get("flavor_profiles", ["any"]),
                         "dining_purpose": preferences.get("dining_purpose", "any"),
@@ -302,74 +360,76 @@ async def analyze_user_message(
                         }),
                         "location": preferences.get("location", "any")
                     }
-                    preferences = validated_prefs
-            
-            # 提取用户画像更新信息
+                else:
+                    preferences = None
+
             profile_updates = None
             if "profile_updates" in result and result.get("profile_updates"):
-                profile_updates = result.get("profile_updates")
-                # 验证并清理空字典
-                if isinstance(profile_updates, dict):
-                    # 移除空字典
-                    cleaned_updates = {}
-                    for key, value in profile_updates.items():
-                        if value and isinstance(value, dict) and len(value) > 0:
-                            cleaned_updates[key] = value
-                    if cleaned_updates:
-                        profile_updates = cleaned_updates
-                    else:
-                        profile_updates = None
-            
-            default_reply = "Sorry, I didn't understand your question." if language == "en" else "抱歉，我没有理解您的问题。"
+                raw_updates = result.get("profile_updates")
+                if isinstance(raw_updates, dict):
+                    cleaned_updates = {
+                        k: v for k, v in raw_updates.items()
+                        if isinstance(v, dict) and len(v) > 0
+                    }
+                    profile_updates = cleaned_updates or None
+
+            confidence = result.get("confidence", 0.8)
+            try:
+                confidence = float(confidence)
+            except (TypeError, ValueError):
+                confidence = 0.8
+
+            reply = result.get("reply", default_reply)
+            if not isinstance(reply, str) or not reply.strip():
+                reply = default_reply
+
             return LLMResponse(
                 intent=intent,
-                reply=result.get("reply", default_reply),
-                confidence=float(result.get("confidence", 0.8)),
+                reply=reply,
+                confidence=confidence,
                 preferences=preferences,
                 profile_updates=profile_updates
             )
-        except json.JSONDecodeError:
-            # 如果不是 JSON 格式，尝试从文本中提取意图
-            content_lower = content.lower()
-            # 简单的意图判断（支持中英文关键词）
-            if language == "zh":
-                query_keywords = ["推荐", "餐厅", "吃饭", "美食", "找", "想吃", "推荐一下"]
-            else:
-                query_keywords = ["recommend", "restaurant", "food", "dining", "find", "looking for", "want", "eat"]
-            is_query = any(keyword in content_lower for keyword in query_keywords)
-            
-            # 如果不是 query，preferences 为 None
-            preferences = None
-            
+        except (json.JSONDecodeError, ValueError, TypeError) as e:
+            last_exception = e
+            if attempt < max_retries:
+                continue
+
+            # 最终回退：用规则推断意图，避免流程中断
+            fallback_intent = _infer_intent_from_text(message, is_in_query_flow)
+            fallback_reply = last_raw_content.strip() if isinstance(last_raw_content, str) and last_raw_content.strip() else default_reply
             return LLMResponse(
-                intent="query" if is_query else "chat",
-                reply=content,  # 直接使用模型返回的内容
-                confidence=0.7 if is_query else 0.8,
-                preferences=preferences,
+                intent=fallback_intent,
+                reply=fallback_reply,
+                confidence=0.6,
+                preferences=None,
                 profile_updates=None
             )
-        
-    except json.JSONDecodeError as e:
-        # JSON 解析失败，尝试提取文本
-        print(f"JSON decode error: {e}")
-        error_msg = "Sorry, I encountered a technical issue. Please try again later." if language == "en" else "抱歉，我遇到了一些技术问题，请稍后再试。"
-        return LLMResponse(
-            intent="chat",
-            reply=error_msg,
-            confidence=0.5,
-            preferences=None,
-            profile_updates=None
-        )
-    except Exception as e:
-        print(f"LLM API error: {e}")
-        error_msg = "Sorry, the service is temporarily unavailable. Please try again later." if language == "en" else "抱歉，服务暂时不可用，请稍后再试。"
-        return LLMResponse(
-            intent="chat",
-            reply=error_msg,
-            confidence=0.3,
-            preferences=None,
-            profile_updates=None
-        )
+        except Exception as e:
+            last_exception = e
+            if attempt < max_retries:
+                continue
+            print(f"LLM API error: {e}")
+            error_msg = "Sorry, the service is temporarily unavailable. Please try again later." if language == "en" else "抱歉，服务暂时不可用，请稍后再试。"
+            return LLMResponse(
+                intent="chat",
+                reply=error_msg,
+                confidence=0.3,
+                preferences=None,
+                profile_updates=None
+            )
+
+    # 理论上不会到这里，作为安全兜底
+    if last_exception:
+        print(f"Unexpected fallback after retries: {last_exception}")
+    error_msg = "Sorry, I encountered a technical issue. Please try again later." if language == "en" else "抱歉，我遇到了一些技术问题，请稍后再试。"
+    return LLMResponse(
+        intent="chat",
+        reply=error_msg,
+        confidence=0.3,
+        preferences=None,
+        profile_updates=None
+    )
 
 
 async def generate_confirmation_message(
@@ -380,6 +440,7 @@ async def generate_confirmation_message(
     user_profile: Optional[Dict[str, Any]] = None,
     guide_missing_preferences: bool = False,
     model: str = LLM_MODEL,
+    max_text_retries: Optional[int] = None,
 ) -> str:
     """
     使用 LLM 生成自然的确认消息
@@ -543,21 +604,29 @@ Extracted preferences: {prefs_text}
 
 Generate natural friendly confirmation message(2-3 sentences): no list format, natural language like chatting, friendly casual not pressuring, can reference user keywords, only confirm the extracted preferences, do NOT ask or guide user to fill missing preferences, do NOT mention missing preference items. Return only confirmation message."""
     
-    try:
-        messages = [{"role": "user", "content": prompt}]
-        response = await client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=0.8,  # 稍高的温度让回复更自然
-            max_tokens=200
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        print(f"Error generating confirmation message: {e}")
-        # 回退到简单的自然语言格式
-        if language == "zh":
-            return f"根据您的需求，我理解您想要{prefs_text}。这样对吗？"
-        else:
+    max_retries = _sanitize_retry_count(
+        max_text_retries,
+        default=int(os.getenv("LLM_MAX_FORMAT_RETRIES", "2"))
+    )
+    for attempt in range(max_retries + 1):
+        try:
+            messages = [{"role": "user", "content": prompt}]
+            response = await client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=0.8,  # 稍高的温度让回复更自然
+                max_tokens=200
+            )
+            content = (response.choices[0].message.content or "").strip()
+            if content:
+                return content
+            raise ValueError("Empty confirmation content")
+        except Exception as e:
+            if attempt < max_retries:
+                continue
+            print(f"Error generating confirmation message: {e}")
+            if language == "zh":
+                return f"根据您的需求，我理解您想要{prefs_text}。这样对吗？"
             return f"Based on your request, I understand you're looking for {prefs_text}. Is this correct?"
 
 
@@ -567,6 +636,7 @@ async def generate_missing_preferences_guidance(
     language: str = "en",
     user_profile: Optional[Dict[str, Any]] = None,
     model: str = LLM_MODEL,
+    max_text_retries: Optional[int] = None,
 ) -> str:
     """
     生成引导用户填写缺失偏好的消息
@@ -617,21 +687,29 @@ async def generate_missing_preferences_guidance(
 
 Generate natural friendly guidance message(2-3 sentences): no list format, natural language like chatting, friendly casual not pressuring, guide user to provide these missing preference information, can give examples, friendly encouraging tone, e.g. "To better recommend restaurants for you, could you tell me your preferred restaurant type? For example, casual dining, fine dining, etc.". Return only guidance message."""
     
-    try:
-        messages = [{"role": "user", "content": prompt}]
-        response = await client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=0.8,
-            max_tokens=200
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        print(f"Error generating missing preferences guidance: {e}")
-        # 回退到简单的引导格式
-        if language == "zh":
-            return f"为了更好地为您推荐餐厅，可以告诉我您的{missing_info_text}偏好吗？"
-        else:
+    max_retries = _sanitize_retry_count(
+        max_text_retries,
+        default=int(os.getenv("LLM_MAX_FORMAT_RETRIES", "2"))
+    )
+    for attempt in range(max_retries + 1):
+        try:
+            messages = [{"role": "user", "content": prompt}]
+            response = await client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=0.8,
+                max_tokens=200
+            )
+            content = (response.choices[0].message.content or "").strip()
+            if content:
+                return content
+            raise ValueError("Empty guidance content")
+        except Exception as e:
+            if attempt < max_retries:
+                continue
+            print(f"Error generating missing preferences guidance: {e}")
+            if language == "zh":
+                return f"为了更好地为您推荐餐厅，可以告诉我您的{missing_info_text}偏好吗？"
             return f"To better recommend restaurants for you, could you tell me your preferences for {missing_info_text}?"
 
 
@@ -698,4 +776,3 @@ async def stream_llm_response(
         error_msg = "Sorry, the service is temporarily unavailable. Please try again later." if language == "en" else "抱歉，服务暂时不可用，请稍后再试。"
         for char in error_msg:
             yield char
-
