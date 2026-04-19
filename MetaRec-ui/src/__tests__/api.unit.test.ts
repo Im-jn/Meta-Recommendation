@@ -54,6 +54,20 @@ describe('frontend unit: api utils', () => {
     await expect(recommend('hi')).rejects.toThrow('Network error: Cannot connect to backend')
   })
 
+  it('recommend should throw contract error when response shape is invalid', async () => {
+    const mockFetch = globalThis.fetch as unknown as ReturnType<typeof vi.fn>
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        restaurants: 'not-an-array',
+      }),
+    })
+
+    await expect(recommend('invalid shape')).rejects.toThrow(
+      'API contract validation failed for /api/process'
+    )
+  })
+
   it('getTaskStatus should include user and conversation query parameters', async () => {
     const mockFetch = globalThis.fetch as unknown as ReturnType<typeof vi.fn>
     mockFetch.mockResolvedValue({

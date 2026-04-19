@@ -166,7 +166,9 @@ The application automatically detects the environment:
 
 ## 📝 Automated Test Pipeline
 
-Multi-part automated testing pipeline (no Playwright E2E yet, that'll be too heavy for now) v1:
+Multi-part automated testing pipeline (no Playwright E2E yet, that'll be too heavy for now) v2:
+
+0. API contract check (OpenAPI export + frontend type generation drift check)
 
 1. Frontend unit tests
 2. Frontend rendering tests
@@ -179,6 +181,8 @@ Multi-part automated testing pipeline (no Playwright E2E yet, that'll be too hea
 
 ```bash
 cd MetaRec-ui
+npm run contract:gen
+npm run contract:check
 npm run test:unit
 npm run test:render
 ```
@@ -196,6 +200,12 @@ Install dev test dependencies:
 ```bash
 cd MetaRec-backend
 python -m pip install -r requirements-dev.txt
+```
+
+Export OpenAPI contract (single source of truth):
+
+```bash
+python scripts/export_openapi.py
 ```
 
 Run each backend category:
@@ -216,10 +226,22 @@ Run all backend categories together:
 python -m pytest -q -m "backend_unit or chain_standard or chain_retrial or chain_fallback"
 ```
 
-### GitHub Actions CI (6-way split + reports)
+### CI/CD Contract Tips
+- Enable auto-generation once per local clone:
+  - `git config core.hooksPath .githooks`
+  - (macOS/Linux) `chmod +x .githooks/pre-commit`
+- Any backend API schema/route change must regenerate contract artifacts:
+  - `python MetaRec-backend/scripts/export_openapi.py`
+  - `cd MetaRec-ui && npm run contract:gen`
+- Run `npm run contract:check` before pushing; this validates generated types still compile.
+- CI contract checks are semantic-first (OpenAPI validate + type compile), not strict file-text matching.
+- For new frontend API calls, add runtime contract validation in `MetaRec-ui/src/utils/api.ts` via `parseWithContract(...)`.
+
+### GitHub Actions CI
 
 CI workflow file: `.github/workflows/tests.yml`
 
+- `contract_check` (semantic validation: export OpenAPI, validate contract, generate frontend types, ensure type compile)
 - `frontend_unit`
 - `frontend_render`
 - `backend_unit`
@@ -227,7 +249,7 @@ CI workflow file: `.github/workflows/tests.yml`
 - `backend_chain_retrial`
 - `backend_chain_fallback`
 
-Each job emits a JUnit XML report artifact (`*-junit`), and a final `Test Report` job publishes a merged PR test summary from all XML files.
+Each test job emits a JUnit XML report artifact (`*-junit`), and a final `Test Report` job publishes a merged PR test summary from all XML files.
 
 ## 📄 License
 

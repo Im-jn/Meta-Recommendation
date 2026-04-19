@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+PYTHON_BIN="python"
+if [ -x "MetaRec-backend/.venv/Scripts/python.exe" ]; then
+  PYTHON_BIN="MetaRec-backend/.venv/Scripts/python.exe"
+fi
+
+echo "[contract-hook] exporting OpenAPI contract..."
+"$PYTHON_BIN" MetaRec-backend/scripts/export_openapi.py
+
+echo "[contract-hook] generating frontend contract types..."
+npm --prefix MetaRec-ui run contract:gen
+
+echo "[contract-hook] staging generated contract artifacts..."
+git add contracts/metarec-openapi.json MetaRec-ui/src/contracts/openapi-types.ts

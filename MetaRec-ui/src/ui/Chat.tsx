@@ -5,6 +5,24 @@ import { MapModal } from './MapModal'
 
 type Message = { role: 'user' | 'assistant'; content: React.ReactNode }
 
+function normalizeMessageRole(role: string): 'user' | 'assistant' {
+  return role === 'user' ? 'user' : 'assistant'
+}
+
+function toLatLngCoordinates(value: Record<string, number> | null | undefined):
+  | { latitude: number; longitude: number }
+  | undefined {
+  if (!value) {
+    return undefined
+  }
+  const latitude = value.latitude
+  const longitude = value.longitude
+  if (typeof latitude === 'number' && typeof longitude === 'number') {
+    return { latitude, longitude }
+  }
+  return undefined
+}
+
 // 欢迎消息常量
 const WELCOME_MESSAGE: Message = {
   role: 'assistant',
@@ -188,7 +206,7 @@ export function Chat({ selectedTypes, selectedFlavors, currentModel, chatHistory
               savedIds.add(resultId)
               
               return {
-                role: msg.role,
+                role: normalizeMessageRole(msg.role),
                 content: <ResultsView 
                   data={recommendationData} 
                   onAddressClick={handleAddressClick}
@@ -197,7 +215,7 @@ export function Chat({ selectedTypes, selectedFlavors, currentModel, chatHistory
             }
             // 普通文本消息
             return {
-              role: msg.role,
+              role: normalizeMessageRole(msg.role),
               content: msg.content
             }
           })
@@ -1940,7 +1958,7 @@ function ResultsView({
                     onAddressClick({
                       name: r.name,
                       address: r.address || '',
-                      coordinates: r.gps_coordinates
+                      coordinates: toLatLngCoordinates(r.gps_coordinates)
                     })
                   }
                 }}
