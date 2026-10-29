@@ -62,16 +62,20 @@ over-cap value).
 
 ### M3 · Single-invocation helper (D2) — target 15 Nov
 
-1. `TraceContext` (trace/debug-run IDs, config, sink, projector, parent
-   instance and node run).
+1. `TraceContext` (trace/debug-run IDs, collector, enabled flag, explicit
+   `parent_run_id` for hand-offs, and B's config, sink and projector).
 2. `invoke_with_wp8_trace(graph, input, config, trace_ctx, *, graph_definition_id)`:
-   - no `trace_ctx` / disabled → exactly `graph.ainvoke(input, config)`;
-   - otherwise copy-merge callbacks and WP8 metadata; never replace
-     `configurable.thread_id` or other business keys; `ainvoke` once;
-   - stamp the graph name / `graph_definition_id` (all graphs report
-     `"LangGraph"` today).
-3. Unit tests on a fake graph: config merge preserves keys, caller's dict not
-   mutated, side-effect counter = 1 (off, on, error, cancel).
+   - no `trace_ctx` / disabled → exactly the runner's old call;
+   - otherwise set only `run_name` (= `graph_definition_id`; every graph
+     reports `"LangGraph"` today) and add the collector to `callbacks` unless
+     it is already inherited; never pass `metadata` or `configurable`,
+     because LangChain replaces explicit keys wholesale and that would drop
+     the inherited parent and checkpoint namespace; `ainvoke` once;
+   - refuse a graph whose topology no longer matches its ID.
+3. Tests: config merge preserves keys, caller's config not mutated, nested
+   calls keep the inherited parent and namespace, explicit parent links
+   across a fresh context, side-effect counter = 1 (off/on × ok/error/cancel),
+   checkpoints unchanged.
 
 **Done when:** helper tests pass with a no-op collector.
 

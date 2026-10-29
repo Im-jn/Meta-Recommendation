@@ -11,7 +11,7 @@ add a log entry (newest first) with every change on a Member A branch. Record on
 |---|---|---|---|---|---|---|
 | M1 | Topology registry | D1 | 8 Nov | ✅ | merged to shared | `tests/test_wp8_topology.py` (25 tests) |
 | M2 | Event contract (`GraphRunEventV1`) | D1 | 8 Nov | 🟡 | merged to shared | `tests/test_wp8_event_contract.py` (108 tests), `tests/test_wp8_golden_events.py` (36 tests); waiting on B for H1–H3 and R1–R10 in `DECISIONS.md` |
-| M3 | Single-invocation helper | D2 | 15 Nov | ⬜ | `wp8/a-m3-invocation-helper` | — |
+| M3 | Single-invocation helper | D2 | 15 Nov | ✅ | `wp8/a-m3-invocation-helper` | `tests/test_wp8_invocation.py` (17 tests) |
 | M4 | Runner plumbing + guard test | D2 | 22 Nov | ⬜ | — | — |
 | M5 | Callback collector | D2 | 29 Nov | ⬜ | — | — |
 | M6 | Task hand-off + trace completion | D2 | 6 Dec | ⬜ | — | — |
@@ -29,6 +29,32 @@ Shared items now live in [../DECISIONS.md](../DECISIONS.md) (hand-offs
 H1–H5, rules R1–R10, decided X1). Member A's side of H4 and H5 is done.
 
 ## Log
+
+### 2026-10-29 — M3 single-invocation helper
+
+- **Added:** `langgraph_metarec/wp8_trace/invocation.py` — `TraceContext`
+  (frozen; `handoff(parent_run_id)` for boundaries that lose context),
+  `traced_config()`, `invoke_with_wp8_trace()` and `TopologyMismatchError`;
+  exported from `wp8_trace`.
+- **Design:** with tracing off the call is the runner's old call, config
+  object and all. With tracing on, only `run_name` and (if not inherited)
+  `callbacks` change. Checked first: LangChain's `ensure_config` replaces any
+  explicitly passed key wholesale, so the helper never passes `metadata` or
+  `configurable`; `run_name` was confirmed not to reach checkpoint metadata.
+  Topology verification costs ~0.4 ms per traced call (graph build is ~7 ms).
+- **Tests:** `tests/test_wp8_invocation.py`, 17 `backend_unit` tests — plain
+  call when off/disabled; config merge keeps business keys and does not
+  mutate the caller's config, list or manager; no duplicate collector;
+  the real routing graph traced is named `routing-graph@v1` with identical
+  output; a nested call keeps the inherited node parent and checkpoint
+  namespace and the same run tree as an untraced call, and `run_name` does
+  not leak; each callback received once; an explicit `handoff` parent links
+  a graph across a fresh `contextvars.Context()` (the E6b case), without it
+  the graph is orphaned; side-effect counter = 1 for off/on × ok/error/cancel
+  with the collector seeing `RuntimeError`/`CancelledError`; unknown or
+  mismatched IDs refused before running; checkpoints identical traced vs not.
+- **Verified:** 17 passed in 6 repeated runs; full backend suite 796 passed,
+  14 skipped. No production module changed yet (M4 wires the runners).
 
 ### 2026-10-29 — Branch workflow; M1–M2 merged to the shared branch
 

@@ -3,6 +3,7 @@
 Nothing in this package is imported by the recommendation path unless WP8
 tracing is wired in, and nothing here may change recommendation behaviour.
 """
+from .invocation import TopologyMismatchError, TraceContext, invoke_with_wp8_trace
 from .models import GraphDefinition, GraphInstance, GraphRunEventV1, TopologyEdge, TopologyNode
 from .topology import (
     RegisteredGraph,
@@ -17,10 +18,13 @@ __all__ = [
     "GraphInstance",
     "GraphRunEventV1",
     "RegisteredGraph",
+    "TopologyMismatchError",
     "TopologyEdge",
     "TopologyNode",
+    "TraceContext",
     "extract_definition",
     "graph_definition_ids",
+    "invoke_with_wp8_trace",
     "registered_graph",
     "topology_definitions",
 ]
