@@ -220,14 +220,15 @@ class TraceContext:              # A provides; created by B's route, carried by 
     sink: "TraceEventSink" | None = None       # B's store
     projector: "SafeProjector" | None = None   # B's redaction
 
-# B provides — wp8_trace/redaction.py
+# B provides — wp8_trace/redaction.py (protocol in wp8_trace/interfaces.py, DECISIONS R16)
 class SafeProjector(Protocol):
-    def summarize(self, value) -> Summary | None: ...
-    def node_state_diff(self, graph_definition_id, node_id, node_input, node_update) -> StateDiff | None: ...
-    def safe_error(self, exc: BaseException) -> SafeError: ...
-    def metadata(self, raw: dict) -> dict: ...
+    policy_id: str
+    def project(self, *, event_type, runnable_type, graph_definition_id, node_id,
+                node_input=None, output=None, error=None, raw_name=None) -> Projection: ...
+    # Projection: input_summary, output_summary, state_diff, metadata, error,
+    # redacted_paths, truncated_paths — one call per event
 
-# B provides — wp8_trace/storage.py
+# B provides — wp8_trace/storage.py (protocol in wp8_trace/interfaces.py; stand-ins in stubs.py)
 class TraceEventSink(Protocol):
     def append(self, trace_id: str, draft: DraftEvent) -> AppendResult: ...   # assigns sequence atomically; accepted | truncated | dropped
     def open_instance(self, trace_id: str, instance: GraphInstance) -> None: ...

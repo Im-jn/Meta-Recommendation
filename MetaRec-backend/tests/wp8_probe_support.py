@@ -260,8 +260,8 @@ async def e2_restaurant_only() -> Dict[str, Any]:
     return {"checked": [r["name"] for r in result.checked_restaurants]}
 
 
-async def e3_service_hotel_chain() -> Dict[str, Any]:
-    return await _hotel_chain("u-probe-hotel")
+async def e3_service_hotel_chain(trace_ctx=None) -> Dict[str, Any]:
+    return await _hotel_chain("u-probe-hotel", trace_ctx=trace_ctx)
 
 
 async def e4_itinerary_anchor(trace_ctx=None) -> Dict[str, Any]:
@@ -347,7 +347,7 @@ async def e6b_handoff_fresh_context() -> Dict[str, Any]:
     return await _handoff(fresh_context=True)
 
 
-async def e7_domain_failure_caught() -> Dict[str, Any]:
+async def e7_domain_failure_caught(trace_ctx=None) -> Dict[str, Any]:
     """An exception inside generic_graph (``_rank_items`` is first called while
     candidate_gather collects items). The service wraps the domain graph in
     try/except and returns an explained empty result."""
@@ -357,15 +357,16 @@ async def e7_domain_failure_caught() -> Dict[str, Any]:
         raise RuntimeError("probe-injected ranking failure")
 
     with patched(generic_graph_module, "_rank_items", boom):
-        return await _hotel_chain("u-probe-fail")
+        return await _hotel_chain("u-probe-fail", trace_ctx=trace_ctx)
 
 
-async def e8_routing_failure_uncaught() -> Dict[str, Any]:
+async def e8_routing_failure_uncaught(trace_ctx=None) -> Dict[str, Any]:
     """An exception inside routing_graph's domain_classification node on the query turn.
     ``_explicit_query_domains`` runs for every non-itinerary query (``classify_domain``
     is skipped when the LLM preferences already name a domain)."""
     from conftest import make_service
     import langgraph_metarec.graphs.routing_graph as routing_graph_module
+    from langgraph_metarec.wp8_trace import trace_kwargs
 
     def boom(query):
         raise RuntimeError("probe-injected classification failure")
@@ -374,13 +375,14 @@ async def e8_routing_failure_uncaught() -> Dict[str, Any]:
     with patched(routing_graph_module, "_explicit_query_domains", boom):
         try:
             result = await service.handle_user_request_async(
-                HOTEL_QUERY, user_id="u-probe-route-fail", session_id="c-probe-route-fail", conversation_history=[])
+                HOTEL_QUERY, user_id="u-probe-route-fail", session_id="c-probe-route-fail", conversation_history=[],
+                **trace_kwargs(trace_ctx))
             return {"raised": None, "type": result.get("type")}
         except Exception as exc:  # noqa: BLE001 — the probe records whatever escapes
             return {"raised": type(exc).__name__}
 
 
-async def e9_background_cancel() -> Dict[str, Any]:
+async def e9_background_cancel(trace_ctx=None) -> Dict[str, Any]:
     """Cancel a running background task through the real conversation-delete path
     (service.cancel_conversation_tasks_async) while generic_graph is mid-tool-call."""
 
@@ -395,13 +397,14 @@ async def e9_background_cancel() -> Dict[str, Any]:
         gate.release.set()
         return {"cancel_summary_cancelled": summary.get("cancelled"), "background_await": awaited}
 
-    return await _hotel_chain("u-probe-cancel", after=cancel_mid_flight)
+    return await _hotel_chain("u-probe-cancel", after=cancel_mid_flight, trace_ctx=trace_ctx)
 
 
-async def e10_request_timeout() -> Dict[str, Any]:
+async def e10_request_timeout(trace_ctx=None) -> Dict[str, Any]:
     """The chat request itself times out while the intention node awaits the LLM
     (e.g. a server timeout or client disconnect cancelling the request task)."""
     from conftest import make_service
+    from langgraph_metarec.wp8_trace import trace_kwargs
 
     class HangingCompletions:
         async def create(self, **kwargs):
@@ -415,18 +418,19 @@ async def e10_request_timeout() -> Dict[str, Any]:
     service.async_client = HangingClient()
     try:
         await asyncio.wait_for(service.handle_user_request_async(
-            HOTEL_QUERY, user_id="u-probe-timeout", session_id="c-probe-timeout", conversation_history=[]), timeout=0.5)
+            HOTEL_QUERY, user_id="u-probe-timeout", session_id="c-probe-timeout", conversation_history=[],
+            **trace_kwargs(trace_ctx)), timeout=0.5)
         return {"raised": None}
     except (asyncio.TimeoutError, TimeoutError) as exc:
         return {"raised": type(exc).__name__}
 
 
-async def e11_multi_domain_siblings() -> Dict[str, Any]:
+async def e11_multi_domain_siblings(trace_ctx=None) -> Dict[str, Any]:
     """A multi-domain request: one domain_graph_dispatch node runs two generic_graph
     instances (hotel, attraction) one after another."""
     prefs = {"location": "Sentosa"}
     return await _confirm_chain("u-probe-multi", MULTI_QUERY, prefs, [intent_payload(MULTI_QUERY, prefs)],
-                                CallCounter(), Gate())
+                                CallCounter(), Gate(), trace_ctx=trace_ctx)
 
 
 EXPERIMENTS: Dict[str, Callable[[], Awaitable[Dict[str, Any]]]] = {

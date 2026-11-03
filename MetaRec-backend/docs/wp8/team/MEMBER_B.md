@@ -43,7 +43,11 @@ Full list with reasons in [DECISIONS.md](DECISIONS.md). In short:
 5. **Start and seal the trace in the debug route (H7).** Build one
    `TraceContext` per debug run, pass it to both `handle_user_request_async`
    calls (A adds the parameter, H6), and call `collector.seal()` in the
-   job's `finally`.
+   job's `finally`. `new_trace_context(trace_id, debug_run_id, sink=...,
+   projector=..., config=...)` in `wp8_trace/collector.py` builds it.
+6. **Implement the projector and sink to R16** (`wp8_trace/interfaces.py`).
+   The collector already runs against `NullProjector` and
+   `InMemoryTraceSink` in `wp8_trace/stubs.py`; your real ones replace them.
 
 Also note X2/X3 in DECISIONS.md: contract numbers and booleans are now
 strict, and a graph-level `error` has `node_id: null`.
