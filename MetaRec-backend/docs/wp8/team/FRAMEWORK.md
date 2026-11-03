@@ -199,16 +199,26 @@ These are the seams where A's and B's code meet. Names are proposals.
 ```python
 # A provides — wp8_trace/invocation.py
 async def invoke_with_wp8_trace(graph, input, config, trace_ctx, *, graph_definition_id: str): ...
-    # merges collector + trace metadata into a copy of config, calls graph.ainvoke ONCE;
-    # trace_ctx None or disabled -> plain graph.ainvoke(input, config)
+    # sets run_name = graph_definition_id and adds the collector unless inherited,
+    # applies an explicit hand-off parent, calls graph.ainvoke ONCE;
+    # trace_ctx None or disabled -> plain graph.ainvoke; a graph it cannot trace
+    # runs once untraced and the collector's on_untraced_graph() is told (DECISIONS R15)
+    # (implemented: langgraph_metarec/wp8_trace/invocation.py)
+
+def trace_kwargs(trace_ctx) -> dict: ...
+    # {"trace_ctx": ctx} while tracing is on, else {}; every runner and service
+    # method forwards the context with **trace_kwargs(ctx) (M4)
 
 @dataclass(frozen=True)
 class TraceContext:              # A provides; created by B's route, carried by A's plumbing
     trace_id: str
     debug_run_id: str
-    config: GraphTraceConfigV1
-    sink: "TraceEventSink"       # B's store
-    projector: "SafeProjector"   # B's redaction
+    collector: BaseCallbackHandler   # A's collector
+    enabled: bool = True
+    parent_run_id: UUID | None = None  # explicit parent for hand-offs that lose context
+    config: GraphTraceConfigV1 | None = None
+    sink: "TraceEventSink" | None = None       # B's store
+    projector: "SafeProjector" | None = None   # B's redaction
 
 # B provides — wp8_trace/redaction.py
 class SafeProjector(Protocol):

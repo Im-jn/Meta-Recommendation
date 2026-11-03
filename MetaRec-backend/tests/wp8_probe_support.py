@@ -183,20 +183,23 @@ def fake_tools(counter: CallCounter, gate: Optional[Gate] = None):
 
 
 async def _confirm_chain(user: str, query: str, preferences: Dict[str, Any], scripted: List[Any],
-                         counter: CallCounter, gate: Gate, after_task_created=None) -> Dict[str, Any]:
+                         counter: CallCounter, gate: Gate, after_task_created=None, trace_ctx=None) -> Dict[str, Any]:
     """Real MetaRecService: query turn -> confirm turn -> real create_task_async -> background task.
 
     The fake tools wait on ``gate`` until the confirm turn has returned, so the
-    background task always outlives the request in the same, repeatable order."""
+    background task always outlives the request in the same, repeatable order.
+    ``trace_ctx`` (WP8 M4+) is passed to both turns, as the debug route does."""
     from conftest import make_service
+    from langgraph_metarec.wp8_trace import trace_kwargs
 
     service, _ = make_service(scripted)
     conv = f"c-{user}"
     with fake_tools(counter, gate):
-        first = await service.handle_user_request_async(query, user_id=user, session_id=conv, conversation_history=[])
+        first = await service.handle_user_request_async(query, user_id=user, session_id=conv, conversation_history=[],
+                                                        **trace_kwargs(trace_ctx))
         second = await service.handle_user_request_async(
             "Yes, that's correct", user_id=user, session_id=conv, conversation_history=[],
-            hitl_state={**first["hitl_state"], "action": "confirm"})
+            hitl_state={**first["hitl_state"], "action": "confirm"}, **trace_kwargs(trace_ctx))
         task_id = second.get("task_id")
         background = service._running_tasks.get(task_id)
         outcome: Dict[str, Any] = {"first_type": first["type"], "second_type": second["type"]}
@@ -215,10 +218,11 @@ async def _confirm_chain(user: str, query: str, preferences: Dict[str, Any], scr
     return outcome
 
 
-def _hotel_chain(user: str, counter: Optional[CallCounter] = None, gate: Optional[Gate] = None, after=None):
+def _hotel_chain(user: str, counter: Optional[CallCounter] = None, gate: Optional[Gate] = None, after=None,
+                 trace_ctx=None):
     return _confirm_chain(user, HOTEL_QUERY, HOTEL_PREFS,
                           [intent_payload(HOTEL_QUERY, HOTEL_PREFS), "Looking for a 4-star hotel near Sentosa — is that correct?"],
-                          counter or CallCounter(), gate or Gate(), after)
+                          counter or CallCounter(), gate or Gate(), after, trace_ctx)
 
 
 # --------------------------------------------------------------------------
@@ -260,11 +264,12 @@ async def e3_service_hotel_chain() -> Dict[str, Any]:
     return await _hotel_chain("u-probe-hotel")
 
 
-async def e4_itinerary_anchor() -> Dict[str, Any]:
+async def e4_itinerary_anchor(trace_ctx=None) -> Dict[str, Any]:
     """tests/test_routing_graph.py anchor fixture with a geocoder that finds nothing,
     so domain_dispatch falls through to the real nested generic_graph call."""
     from conftest import make_service, query_intent_json
     import langgraph_metarec.tool_registry as tool_registry_module
+    from langgraph_metarec.wp8_trace import trace_kwargs
 
     constraints = json.dumps({
         "location": "Sentosa", "date": "2026-08-03", "start_time": "09:00", "end_time": "19:00",
@@ -276,7 +281,7 @@ async def e4_itinerary_anchor() -> Dict[str, Any]:
     with patched(tool_registry_module, "geocode_anchor_candidates", lambda q, d, max_results=4: []), fake_tools(counter):
         result = await service.handle_user_request_async(
             "Plan a day in Sentosa starting from my hotel", user_id="u-probe-anchor",
-            session_id="c-probe-anchor", conversation_history=[], itinerary_mode=True)
+            session_id="c-probe-anchor", conversation_history=[], itinerary_mode=True, **trace_kwargs(trace_ctx))
     return {"type": result["type"], "tool_adapter_calls": counter.count}
 
 

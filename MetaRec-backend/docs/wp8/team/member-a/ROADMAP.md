@@ -63,16 +63,24 @@ over-cap value).
 
 ### M3 · Single-invocation helper (D2) — target 15 Nov
 
-1. `TraceContext` (trace/debug-run IDs, config, sink, projector, parent
-   instance and node run).
+1. `TraceContext` (trace/debug-run IDs, collector, enabled flag, explicit
+   `parent_run_id` for hand-offs, and B's config, sink and projector).
 2. `invoke_with_wp8_trace(graph, input, config, trace_ctx, *, graph_definition_id)`:
-   - no `trace_ctx` / disabled → exactly `graph.ainvoke(input, config)`;
-   - otherwise copy-merge callbacks and WP8 metadata; never replace
-     `configurable.thread_id` or other business keys; `ainvoke` once;
-   - stamp the graph name / `graph_definition_id` (all graphs report
-     `"LangGraph"` today).
-3. Unit tests on a fake graph: config merge preserves keys, caller's dict not
-   mutated, side-effect counter = 1 (off, on, error, cancel).
+   - no `trace_ctx` / disabled → exactly the runner's old call;
+   - otherwise set only `run_name` (= `graph_definition_id`; every graph
+     reports `"LangGraph"` today) and add the collector to `callbacks` unless
+     it is already inherited; never pass `metadata` or `configurable`,
+     because LangChain replaces explicit keys wholesale and that would drop
+     the inherited parent and checkpoint namespace; `ainvoke` once;
+   - an explicit hand-off parent applies whatever form the callbacks take;
+   - a graph it cannot trace (unregistered ID, changed topology) runs once
+     untraced and is reported to the collector, never refused
+     ([R15](../DECISIONS.md)).
+3. Tests: config merge preserves keys, caller's config not mutated, nested
+   calls keep the inherited parent and namespace, explicit parent links
+   across a fresh or copied context and for every callbacks form, side-effect
+   counter = 1 (off/on × ok/error/cancel and for untraceable graphs),
+   checkpoints unchanged.
 
 **Done when:** helper tests pass with a no-op collector.
 
@@ -97,6 +105,16 @@ over-cap value).
 
 **Done when:** guard test passes and fails on each planted bypass; a debug
 run with a trace context reaches all five runners through the helper.
+
+*As built:* every runner and service method on the debug path takes an
+optional keyword-only `trace_ctx` and forwards it with `**trace_kwargs(ctx)`,
+which is `{}` while tracing is off, so untraced calls keep their exact
+arguments. Nodes reach it by closure (`build_request_orchestrator_graph(...,
+trace_ctx=)`, the service's adapter closures); it never enters graph state or
+config. The task path (`create_task_async` → `run_task_graph` → domain graphs)
+already carries `trace_ctx`, so M6 step 1 is only the explicit hand-off
+parent. `_refine_itinerary_slot_unlocked` (the itinerary refine endpoint) is
+not reachable from a debug run and passes none.
 
 ### M5 · Callback collector (D2) — target 29 Nov
 
@@ -125,8 +143,10 @@ counts, one root per turn, valid parents, no cycles, no router "nodes".
 
 ### M6 · Task hand-off + trace completion (D2) — target 6 Dec
 
-1. Pass `trace_ctx` explicitly through `create_task_async` →
-   `run_recommendation_task_graph` → `run_task_graph`.
+1. At `create_task_async`, read the `domain_dispatch` node run id and pass
+   `trace_ctx.handoff(node_run_id)` into the background task (M4 already
+   carries `trace_ctx` along `create_task_async` →
+   `run_recommendation_task_graph` → `run_task_graph`).
 2. Update `test_task_handoff_parent_depends_on_inherited_context`: a
    fresh-context hand-off must now **still link**.
 3. Trace status ([R11](../DECISIONS.md)): `running` until the trace is
