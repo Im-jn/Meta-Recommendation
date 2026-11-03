@@ -173,6 +173,7 @@ From the D0 probe over the real graphs ([../parentage-baseline/REPORT.md](../par
 | Tool and LLM calls fire no native callbacks | Their events come only from the WP5/WP7 adapter sink | A |
 | Inherited callback metadata carries the conversation `thread_id` | Never derive identity from inherited metadata | A |
 | Two `generic_graph` instances can share one parent node run (E11) | One `graph_instance_id` per run; diff counts invocations | A (ids), B (diff) |
+| A behaviour-test debug run makes two service calls (query turn, auto-confirm turn) | One trace per debug run with one root per turn; finish only when the route has sealed the trace and every lifecycle has closed (DECISIONS R11) | A (status), B (route seals) |
 
 ## 6. Non-negotiable invariants
 
@@ -255,8 +256,8 @@ against it before integrating.
 
 | Evidence (acceptance row) | Owner | Where |
 |---|---|---|
-| Five-runner guard test catches a new `ainvoke` bypass | A | `test_wp8_integration.py` |
-| Fixture fidelity: visited nodes, lifecycle counts, one root, valid parents, no cycles, contiguous sequence | A | `test_wp8_collector.py`, `tests/fixtures/wp8/` |
+| Five-runner guard test catches a new `ainvoke`/streaming bypass (DECISIONS R14) | A | `test_wp8_integration.py` |
+| Fixture fidelity: visited nodes, lifecycle counts, one root per turn, valid parents, no cycles, contiguous sequence | A | `test_wp8_collector.py`, `tests/fixtures/wp8/` |
 | Side-effect counter = 1 (off / on / error / cancel); byte-identical output off vs on | A | `test_wp8_integration.py` |
 | 50 concurrent traces, no cross-trace leakage | A | `test_wp8_integration.py` (uses B's store) |
 | 100 paired warm runs: median ≤ 5 %, p95 ≤ 10 % overhead; no-op path separately | A | `scripts/` benchmark |
