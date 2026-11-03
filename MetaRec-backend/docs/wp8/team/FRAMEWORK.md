@@ -205,6 +205,10 @@ async def invoke_with_wp8_trace(graph, input, config, trace_ctx, *, graph_defini
     # runs once untraced and the collector's on_untraced_graph() is told (DECISIONS R15)
     # (implemented: langgraph_metarec/wp8_trace/invocation.py)
 
+def trace_kwargs(trace_ctx) -> dict: ...
+    # {"trace_ctx": ctx} while tracing is on, else {}; every runner and service
+    # method forwards the context with **trace_kwargs(ctx) (M4)
+
 @dataclass(frozen=True)
 class TraceContext:              # A provides; created by B's route, carried by A's plumbing
     trace_id: str

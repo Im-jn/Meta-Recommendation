@@ -106,6 +106,16 @@ over-cap value).
 **Done when:** guard test passes and fails on each planted bypass; a debug
 run with a trace context reaches all five runners through the helper.
 
+*As built:* every runner and service method on the debug path takes an
+optional keyword-only `trace_ctx` and forwards it with `**trace_kwargs(ctx)`,
+which is `{}` while tracing is off, so untraced calls keep their exact
+arguments. Nodes reach it by closure (`build_request_orchestrator_graph(...,
+trace_ctx=)`, the service's adapter closures); it never enters graph state or
+config. The task path (`create_task_async` → `run_task_graph` → domain graphs)
+already carries `trace_ctx`, so M6 step 1 is only the explicit hand-off
+parent. `_refine_itinerary_slot_unlocked` (the itinerary refine endpoint) is
+not reachable from a debug run and passes none.
+
 ### M5 · Callback collector (D2) — target 29 Nov
 
 1. Handler that maps `on_chain_start/end/error` to graph/node drafts, using
@@ -133,8 +143,10 @@ counts, one root per turn, valid parents, no cycles, no router "nodes".
 
 ### M6 · Task hand-off + trace completion (D2) — target 6 Dec
 
-1. Pass `trace_ctx` explicitly through `create_task_async` →
-   `run_recommendation_task_graph` → `run_task_graph`.
+1. At `create_task_async`, read the `domain_dispatch` node run id and pass
+   `trace_ctx.handoff(node_run_id)` into the background task (M4 already
+   carries `trace_ctx` along `create_task_async` →
+   `run_recommendation_task_graph` → `run_task_graph`).
 2. Update `test_task_handoff_parent_depends_on_inherited_context`: a
    fresh-context hand-off must now **still link**.
 3. Trace status ([R11](../DECISIONS.md)): `running` until the trace is

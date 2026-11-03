@@ -12,7 +12,7 @@ add a log entry (newest first) with every change on a Member A branch. Record on
 | M1 | Topology registry | D1 | 8 Nov | ✅ | merged to shared | `tests/test_wp8_topology.py` (26 tests) |
 | M2 | Event contract (`GraphRunEventV1`) | D1 | 8 Nov | 🟡 | merged to shared | `tests/test_wp8_event_contract.py` (120 tests), `tests/test_wp8_golden_events.py` (40 tests); waiting on B for H1–H3, H7 and R1–R15 in `DECISIONS.md` |
 | M3 | Single-invocation helper | D2 | 15 Nov | ✅ | `wp8/a-m3-invocation-helper` | `tests/test_wp8_invocation.py` (26 tests) |
-| M4 | Runner plumbing + guard test | D2 | 22 Nov | ⬜ | — | — |
+| M4 | Runner plumbing + guard test | D2 | 22 Nov | ✅ | `wp8/a-m4-runner-plumbing` | `tests/test_wp8_integration.py` (12 tests), `tests/test_wp8_invocation.py` (27 tests) |
 | M5 | Callback collector | D2 | 29 Nov | ⬜ | — | — |
 | M6 | Task hand-off + trace completion | D2 | 6 Dec | ⬜ | — | — |
 | M7 | WP5/WP7 adapter events | D2 | 13 Dec | ⬜ | — | — |
@@ -30,6 +30,46 @@ H1–H8, rules R1–R15, decided X1–X3). Member A's side of H4 and H5 is done;
 H6 is planned for M4.
 
 ## Log
+
+### 2026-11-03 — M4 runner plumbing + guard test
+
+- **Branch:** `wp8/a-m4-runner-plumbing`, from `wp8/a-m3-invocation-helper`
+  after the shared branch was merged into it.
+- **Runners:** all five `ainvoke` sites now go through
+  `invoke_with_wp8_trace` with a literal `graph_definition_id`;
+  `run_routing_graph`, `run_generic_domain_graph`, `run_restaurant_graph`,
+  `run_task_graph` and `run_request_orchestrator` take an optional
+  keyword-only `trace_ctx`. `build_request_orchestrator_graph(..., trace_ctx=)`
+  hands it to the routing node by closure.
+- **Service (H6):** `handle_user_request_async(..., *, trace_ctx=None)` →
+  `_handle_user_request_graph` → orchestrator, `create_task_adapter` →
+  `create_task_async` → `_run_scoped_task` → `_run_task_graph_compatible`
+  (only if the runner accepts it) → `run_recommendation_task_graph` →
+  `run_task_graph` and both `_execute_*_domain_task`; the itinerary anchor
+  adapter → `_execute_generic_domain_task`. Forwarded with
+  `**trace_kwargs(ctx)` (new in `invocation.py`), which is `{}` while tracing
+  is off, so untraced calls keep their exact arguments and existing test fakes
+  with fixed signatures still work. The context never enters graph state or
+  config.
+- **Guard (R14):** `tests/test_wp8_integration.py` — AST scan of production
+  code for graph-method attributes and `getattr` of them outside the helper;
+  each registered ID at exactly one helper call site with a literal ID;
+  five planted bypasses (direct, streaming, aliased, sync, getattr).
+  Restoring a direct `graph.ainvoke` in `routing_graph.py` made both guard
+  tests fail, naming `routing_graph.py:533`.
+- **End to end:** a traced two-turn hotel debug run reaches orchestrator ×2
+  (two roots, R11), routing (under `routing`), task (under
+  `domain_dispatch`) and generic (under `domain_graph_dispatch`), none named
+  `"LangGraph"`; the itinerary anchor's generic graph is under
+  `domain_dispatch`; a traced restaurant task reaches the restaurant graph
+  under `domain_graph_dispatch`. Tracing on vs off gives the same outcome and
+  the same tool-adapter call count.
+- **Probe harness:** `_confirm_chain`, `_hotel_chain` and
+  `e4_itinerary_anchor` accept an optional `trace_ctx` (default unchanged).
+- **Verified:** full backend suite 835 passed, 14 skipped, in 3 repeated
+  runs (+13 tests). Not yet covered: the task hand-off parent across a fresh
+  context and trace completion (M6), the collector itself (M5), and the debug
+  route creating the context (H7, Member B).
 
 ### 2026-11-03 — Review fixes before M4 (shared branch + M3)
 
