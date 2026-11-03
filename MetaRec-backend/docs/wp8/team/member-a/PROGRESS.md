@@ -13,7 +13,7 @@ add a log entry (newest first) with every change on a Member A branch. Record on
 | M2 | Event contract (`GraphRunEventV1`) | D1 | 8 Nov | 🟡 | merged to shared | `tests/test_wp8_event_contract.py` (120 tests), `tests/test_wp8_golden_events.py` (40 tests); waiting on B for H1–H3, H7 and R1–R15 in `DECISIONS.md` |
 | M3 | Single-invocation helper | D2 | 15 Nov | ✅ | `wp8/a-m3-invocation-helper` | `tests/test_wp8_invocation.py` (26 tests) |
 | M4 | Runner plumbing + guard test | D2 | 22 Nov | ✅ | `wp8/a-m4-runner-plumbing` | `tests/test_wp8_integration.py` (12 tests), `tests/test_wp8_invocation.py` (27 tests) |
-| M5 | Callback collector | D2 | 29 Nov | ⬜ | — | — |
+| M5 | Callback collector | D2 | 29 Nov | ✅ | `wp8/a-m5-callback-collector` | `tests/test_wp8_collector.py` (21 tests) |
 | M6 | Task hand-off + trace completion | D2 | 6 Dec | ⬜ | — | — |
 | M7 | WP5/WP7 adapter events | D2 | 13 Dec | ⬜ | — | — |
 | M8 | Integration + capture evidence | D2–D3 | 24 Jan | ⬜ | — | needs B's projector and store |
@@ -30,6 +30,46 @@ H1–H8, rules R1–R15, decided X1–X3). Member A's side of H4 and H5 is done;
 H6 is planned for M4.
 
 ## Log
+
+### 2026-11-03 — M5 callback collector
+
+- **Branch:** `wp8/a-m5-callback-collector`, from `wp8/a-m4-runner-plumbing`
+  at `9ac8123`.
+- **Added:** `wp8_trace/collector.py` — `TraceCollector`
+  (`run_inline`, so callbacks are handled in order on the caller's thread;
+  `raise_error=False` plus an internal-error list, so a collector, sink or
+  projector failure never reaches the run) and `new_trace_context()`.
+  `wp8_trace/interfaces.py` — `DraftEvent` (`finalize()` builds the contract
+  event), `AppendResult`, `Projection`, `SafeProjector` and `TraceEventSink`
+  protocols (R16). `wp8_trace/stubs.py` — `NullProjector` (draft R10 error
+  codes) and `InMemoryTraceSink` (validates every event, one lock for
+  sequence + append).
+- **Rules:** graphs by registered `run_name`; nodes by topology; routers and
+  other inner runnables pass through to their node; native tool/LLM
+  callbacks become metadata-only child spans of exactly their node; orphans,
+  post-seal roots and `"LangGraph"`-named (untraced) graphs are withheld with
+  their subtree and counted (R11, R12, R15); `CancelledError` → `cancelled`;
+  errors reuse the run's `run_id`; injectable clock; one `graph_instance_id`
+  per graph run with `open_instance`/`close_instance` on the sink;
+  `seal()`, `on_untraced_graph()`, `open_run_ids`, `incomplete_reasons` for
+  M6.
+- **Harness:** E3 and E7–E11 accept an optional `trace_ctx` (default
+  unchanged).
+- **Tests:** `tests/test_wp8_collector.py`, 21 — live replays of nine golden
+  cases (`full_debug_run`, both E3 turns, itinerary anchor, repeated
+  domain graphs, caught and uncaught failure, cancellation, timeout) match
+  event for event with parent structure; contiguous sequence, one root per
+  turn, parents start first, each run closes once, no router nodes;
+  instances link to their invoking node and close; fresh-context hand-off
+  withheld without and linked with the explicit parent; no root after seal;
+  unknown parent withheld with its subtree; untraced graph withheld and
+  reported; pass-through and tool/LLM spans attach to the node; durations
+  from the injected clock; failing sink or projector leaves the run intact;
+  a seeded secret reaches the projector but no stored event, and prompts never
+  reach the projector.
+- **Verified:** full backend suite 856 passed, 14 skipped, in 3 repeated
+  runs (+21 tests). Not yet: trace status/finalize and the explicit hand-off
+  parent (M6), capture flags from B's config (M8), B's real projector/sink.
 
 ### 2026-11-03 — M4 runner plumbing + guard test
 

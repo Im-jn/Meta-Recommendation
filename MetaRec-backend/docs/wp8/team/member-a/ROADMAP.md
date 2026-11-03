@@ -141,6 +141,17 @@ not reachable from a debug run and passes none.
 **Done when:** collector fixtures give the exact expected nodes and lifecycle
 counts, one root per turn, valid parents, no cycles, no router "nodes".
 
+*As built:* `wp8_trace/collector.py` (`TraceCollector`, `new_trace_context`),
+`interfaces.py` (`DraftEvent`, `AppendResult`, `Projection`, the projector and
+sink protocols, [R16](../DECISIONS.md)) and `stubs.py` (`NullProjector`,
+`InMemoryTraceSink`). Native tool/LLM callbacks map to metadata-only child
+spans of their node (none fire in MetaRec today). Other runnables inside a
+node, such as routers or a `RunnableLambda`, emit nothing; their children
+attach to the node. Live replays of D0 E3, E4 and E7–E11 match nine golden
+cases event for event, parents included. Not yet: the capture flags in
+`GraphTraceConfigV1` (`child_events: none`, `state_diff: none`) are applied
+once B's config model exists (M8); trace status and `finalize` are M6.
+
 ### M6 · Task hand-off + trace completion (D2) — target 6 Dec
 
 1. At `create_task_async`, read the `domain_dispatch` node run id and pass
