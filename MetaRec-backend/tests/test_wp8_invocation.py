@@ -16,6 +16,7 @@ from langgraph_metarec.wp8_trace import topology
 from langgraph_metarec.wp8_trace.invocation import (
     TraceContext,
     invoke_with_wp8_trace,
+    trace_kwargs,
     traced_config,
 )
 from wp8_probe_support import RecordingHandler, build_runs
@@ -125,6 +126,15 @@ async def test_untraced_call_is_exactly_the_plain_call(ctx):
 
     assert graph.calls[0] == (({"a": 1},), {})
     assert graph.calls[1][0][1] is config, "the caller's config object is passed through unchanged"
+
+
+@pytest.mark.backend_unit
+def test_trace_kwargs_forward_the_context_only_while_tracing_is_on():
+    ctx = _ctx()
+
+    assert trace_kwargs(None) == {}
+    assert trace_kwargs(_ctx(enabled=False)) == {}, "a disabled context leaves every call as it was"
+    assert trace_kwargs(ctx) == {"trace_ctx": ctx}
 
 
 @pytest.mark.backend_unit

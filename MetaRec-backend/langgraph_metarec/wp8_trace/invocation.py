@@ -60,6 +60,15 @@ class TraceContext:
         return replace(self, parent_run_id=parent_run_id)
 
 
+def trace_kwargs(trace_ctx: Optional[TraceContext]) -> dict:
+    """``{"trace_ctx": ctx}`` while tracing is on, else ``{}``.
+
+    Runners and service methods forward the context with ``**trace_kwargs(ctx)``,
+    so with tracing off every call keeps exactly the arguments it had before WP8.
+    """
+    return {"trace_ctx": trace_ctx} if trace_ctx is not None and trace_ctx.enabled else {}
+
+
 def _effective_callbacks(config: Optional[Mapping[str, Any]]) -> Any:
     """The callbacks LangChain will use for this call: explicit, else inherited."""
     if config is not None and config.get("callbacks") is not None:
