@@ -71,10 +71,14 @@ over-cap value).
      it is already inherited; never pass `metadata` or `configurable`,
      because LangChain replaces explicit keys wholesale and that would drop
      the inherited parent and checkpoint namespace; `ainvoke` once;
-   - refuse a graph whose topology no longer matches its ID.
+   - an explicit hand-off parent applies whatever form the callbacks take;
+   - a graph it cannot trace (unregistered ID, changed topology) runs once
+     untraced and is reported to the collector, never refused
+     ([R15](../DECISIONS.md)).
 3. Tests: config merge preserves keys, caller's config not mutated, nested
    calls keep the inherited parent and namespace, explicit parent links
-   across a fresh context, side-effect counter = 1 (off/on × ok/error/cancel),
+   across a fresh or copied context and for every callbacks form, side-effect
+   counter = 1 (off/on × ok/error/cancel and for untraceable graphs),
    checkpoints unchanged.
 
 **Done when:** helper tests pass with a no-op collector.

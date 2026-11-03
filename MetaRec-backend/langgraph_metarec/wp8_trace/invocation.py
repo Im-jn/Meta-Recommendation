@@ -10,15 +10,20 @@ graph run:
   nested runs or checkpoint metadata.
 - ``callbacks`` gains the WP8 collector, unless the collector is already
   inherited from an enclosing traced run (then the key is left alone, which
-  keeps that run as the callback parent).
+  keeps that run as the callback parent). An explicit hand-off parent
+  (``TraceContext.handoff``) is applied whatever form the callbacks take.
 
-LangChain replaces, not merges, any config key passed explicitly, so passing 
-``metadata`` or ``configurable`` to a nested call would drop the inherited checkpoint 
-namespace and callback parent. WP8 identity travels in the run name and the collector, 
-and never in config metadata.
+LangChain replaces, not merges, any config key passed explicitly, so passing
+``metadata`` or ``configurable`` to a nested call would drop the inherited checkpoint
+namespace and callback parent. WP8 identity travels in the run name and the collector,
+and never in config metadata (DECISIONS.md R13).
+
+Tracing never fails or repeats the business call: a graph the helper cannot
+trace runs once, untraced, and the collector is told (DECISIONS.md R15).
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, replace
 from typing import Any, Mapping, Optional
 from uuid import UUID
@@ -28,9 +33,7 @@ from langchain_core.runnables.config import var_child_runnable_config
 
 from .topology import matches_registered
 
-
-class TopologyMismatchError(RuntimeError):
-    """A graph was invoked under a graph_definition_id whose topology it no longer has."""
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -73,12 +76,25 @@ def _handlers(callbacks: Any) -> list:
     return list(callbacks)
 
 
-def _with_collector(callbacks: Any, ctx: TraceContext) -> Any:
+def _traced_callbacks(callbacks: Any, ctx: TraceContext) -> Any:
+    """Callbacks for a traced call, or None to leave the effective ones untouched.
+
+    Adds the collector unless it is already there, and applies an explicit
+    hand-off parent to a list and to a callback manager alike.
+    """
+    has_collector = ctx.collector in _handlers(callbacks)
+    if has_collector and ctx.parent_run_id is None:
+        return None
     if isinstance(callbacks, BaseCallbackManager):
         manager = callbacks.copy()
-        manager.add_handler(ctx.collector, inherit=True)
+        if not has_collector:
+            manager.add_handler(ctx.collector, inherit=True)
+        if ctx.parent_run_id is not None:
+            manager.parent_run_id = ctx.parent_run_id
         return manager
-    handlers = [*(callbacks or []), ctx.collector]
+    handlers = [*(callbacks or [])]
+    if not has_collector:
+        handlers.append(ctx.collector)
     if ctx.parent_run_id is not None:
         return CallbackManager(handlers=handlers, inheritable_handlers=handlers, parent_run_id=ctx.parent_run_id)
     return handlers
@@ -92,10 +108,40 @@ def traced_config(
     """A new config for one traced graph run; the caller's config is not mutated."""
     merged = dict(config or {})
     merged["run_name"] = graph_definition_id
-    effective = _effective_callbacks(config)
-    if trace_ctx.collector not in _handlers(effective):
-        merged["callbacks"] = _with_collector(effective, trace_ctx)
+    callbacks = _traced_callbacks(_effective_callbacks(config), trace_ctx)
+    if callbacks is not None:
+        merged["callbacks"] = callbacks
     return merged
+
+
+def _untraceable_reason(graph: Any, graph_definition_id: str) -> Optional[str]:
+    try:
+        return None if matches_registered(graph, graph_definition_id) else "topology_mismatch"
+    except KeyError:
+        return "unregistered_definition"
+    except Exception:
+        logger.exception("WP8 topology check failed for %s", graph_definition_id)
+        return "topology_check_failed"
+
+
+def _report_untraced(trace_ctx: TraceContext, graph_definition_id: str, reason: str) -> None:
+    logger.warning(
+        "WP8: %s runs untraced (%s); if its topology changed, bump its version in "
+        "langgraph_metarec/wp8_trace/topology.py", graph_definition_id, reason,
+    )
+    report = getattr(trace_ctx.collector, "on_untraced_graph", None)
+    if report is None:
+        return
+    try:
+        report(graph_definition_id, reason)
+    except Exception:
+        logger.exception("WP8 collector could not record an untraced graph")
+
+
+async def _plain_call(graph: Any, input: Any, config: Optional[Mapping[str, Any]], kwargs: dict) -> Any:
+    if config is None:
+        return await graph.ainvoke(input, **kwargs)
+    return await graph.ainvoke(input, config, **kwargs)
 
 
 async def invoke_with_wp8_trace(
@@ -109,12 +155,9 @@ async def invoke_with_wp8_trace(
 ) -> Any:
     """Invoke a compiled MetaRec graph exactly once, traced when ``trace_ctx`` is enabled."""
     if trace_ctx is None or not trace_ctx.enabled:
-        if config is None:
-            return await graph.ainvoke(input, **kwargs)
-        return await graph.ainvoke(input, config, **kwargs)
-    if not matches_registered(graph, graph_definition_id):
-        raise TopologyMismatchError(
-            f"graph does not match the registered topology of {graph_definition_id}; "
-            "bump its version in langgraph_metarec/wp8_trace/topology.py"
-        )
+        return await _plain_call(graph, input, config, kwargs)
+    reason = _untraceable_reason(graph, graph_definition_id)
+    if reason is not None:
+        _report_untraced(trace_ctx, graph_definition_id, reason)
+        return await _plain_call(graph, input, config, kwargs)
     return await graph.ainvoke(input, traced_config(config, trace_ctx, graph_definition_id), **kwargs)

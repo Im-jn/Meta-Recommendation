@@ -199,7 +199,9 @@ These are the seams where A's and B's code meet. Names are proposals.
 # A provides — wp8_trace/invocation.py
 async def invoke_with_wp8_trace(graph, input, config, trace_ctx, *, graph_definition_id: str): ...
     # sets run_name = graph_definition_id and adds the collector unless inherited,
-    # calls graph.ainvoke ONCE; trace_ctx None or disabled -> plain graph.ainvoke
+    # applies an explicit hand-off parent, calls graph.ainvoke ONCE;
+    # trace_ctx None or disabled -> plain graph.ainvoke; a graph it cannot trace
+    # runs once untraced and the collector's on_untraced_graph() is told (DECISIONS R15)
     # (implemented: langgraph_metarec/wp8_trace/invocation.py)
 
 @dataclass(frozen=True)

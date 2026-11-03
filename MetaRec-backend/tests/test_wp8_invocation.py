@@ -2,6 +2,7 @@
 import asyncio
 import contextvars
 import copy
+import uuid
 from typing import TypedDict
 
 import pytest
@@ -13,7 +14,6 @@ from langgraph.graph import END, START, StateGraph
 from langgraph_metarec.graphs.routing_graph import build_routing_graph
 from langgraph_metarec.wp8_trace import topology
 from langgraph_metarec.wp8_trace.invocation import (
-    TopologyMismatchError,
     TraceContext,
     invoke_with_wp8_trace,
     traced_config,
@@ -80,6 +80,19 @@ def registered_test_graphs(monkeypatch):
     topology.registered_graph.cache_clear()
     yield
     topology.registered_graph.cache_clear()
+
+
+class ReportingHandler(RecordingHandler):
+    """A collector that also accepts the helper's untraced-graph report (R15)."""
+
+    def __init__(self, fail=False):
+        super().__init__()
+        self.untraced, self.fail = [], fail
+
+    def on_untraced_graph(self, graph_definition_id, reason):
+        self.untraced.append((graph_definition_id, reason))
+        if self.fail:
+            raise RuntimeError("collector bug")
 
 
 def _ctx(collector=None, **kwargs):
@@ -155,6 +168,28 @@ def test_collector_already_present_is_not_added_twice():
     callbacks = [ctx.collector]
 
     assert traced_config({"callbacks": callbacks}, ctx, "task-graph@v1")["callbacks"] is callbacks
+
+
+@pytest.mark.backend_unit
+@pytest.mark.parametrize("form", ["none", "list", "manager", "list_with_collector", "manager_with_collector"])
+def test_explicit_handoff_parent_is_applied_whatever_the_callbacks(form):
+    other, parent = RecordingHandler(), uuid.uuid4()
+    ctx = _ctx().handoff(parent)
+    handlers = [other, ctx.collector] if form.endswith("with_collector") else [other]
+    callbacks = {
+        "none": None,
+        "list": handlers,
+        "list_with_collector": handlers,
+        "manager": CallbackManager(handlers=handlers, inheritable_handlers=handlers),
+        "manager_with_collector": CallbackManager(handlers=handlers, inheritable_handlers=handlers),
+    }[form]
+
+    merged = traced_config({"callbacks": callbacks}, ctx, "task-graph@v1")["callbacks"]
+
+    assert merged.parent_run_id == parent
+    assert merged.handlers.count(ctx.collector) == 1
+    if isinstance(callbacks, CallbackManager):
+        assert callbacks.parent_run_id is None and callbacks.handlers == handlers, "caller's manager not mutated"
 
 
 @pytest.mark.backend_unit
@@ -252,6 +287,27 @@ async def test_explicit_parent_links_a_graph_across_a_fresh_context():
     (lost,) = [r for r in orphan.values() if r["name"] == "routing-graph@v1"]
     assert lost["parent_run_id"] is None
 
+
+@pytest.mark.backend_unit
+@pytest.mark.asyncio
+async def test_explicit_parent_also_holds_when_the_context_is_copied():
+    """Today's asyncio.create_task hand-off: inherited manager and explicit parent agree."""
+    ctx = _ctx()
+
+    async def inner():
+        node_run_id = var_child_runnable_config.get()["callbacks"].parent_run_id
+        await asyncio.create_task(
+            invoke_with_wp8_trace(build_routing_graph(), dict(ROUTING_INPUT), None, ctx.handoff(node_run_id),
+                                  graph_definition_id="routing-graph@v1")
+        )
+
+    runs = await _run_outer(ctx, inner)
+
+    (child,) = [r for r in runs.values() if r["name"] == "routing-graph@v1"]
+    assert child["parent_run_id"] == _node_run(runs, "call_inner")["run_id"]
+    starts = [e["run_id"] for e in ctx.collector.events if e["event"] == "chain_start"]
+    assert len(starts) == len(set(starts)), "each callback received once"
+
 @pytest.mark.backend_unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("traced", [False, True])
@@ -282,17 +338,32 @@ async def test_side_effect_runs_exactly_once(traced, mode):
 
 @pytest.mark.backend_unit
 @pytest.mark.asyncio
-async def test_unknown_or_mismatched_definition_is_refused_before_running():
+@pytest.mark.parametrize("graph_definition_id,reason", [
+    ("not-registered@v1", "unregistered_definition"),
+    ("routing-graph@v1", "topology_mismatch"),
+])
+async def test_untraceable_graph_runs_once_untraced_and_is_reported(graph_definition_id, reason):
+    """R15: tracing never fails or repeats the business call."""
+    behaviour, collector = Behaviour(), ReportingHandler()
+
+    out = await invoke_with_wp8_trace(build_counter_graph(behaviour), {"n": 0}, {"configurable": {"thread_id": "t"}},
+                                      _ctx(collector), graph_definition_id=graph_definition_id)
+
+    assert out == {"n": 1} and behaviour.calls == 1
+    assert collector.untraced == [(graph_definition_id, reason)]
+    assert collector.events == [], "the root call ran with the caller's own config, without the collector"
+
+
+@pytest.mark.backend_unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("collector", [RecordingHandler, lambda: ReportingHandler(fail=True)])
+async def test_a_collector_that_cannot_record_the_report_does_not_break_the_run(collector):
     behaviour = Behaviour()
 
-    with pytest.raises(KeyError):
-        await invoke_with_wp8_trace(build_counter_graph(behaviour), {"n": 0}, None, _ctx(),
-                                    graph_definition_id="not-registered@v1")
-    with pytest.raises(TopologyMismatchError):
-        await invoke_with_wp8_trace(build_counter_graph(behaviour), {"n": 0}, None, _ctx(),
-                                    graph_definition_id="routing-graph@v1")
+    out = await invoke_with_wp8_trace(build_counter_graph(behaviour), {"n": 0}, None, _ctx(collector()),
+                                      graph_definition_id="routing-graph@v1")
 
-    assert behaviour.calls == 0
+    assert out == {"n": 1} and behaviour.calls == 1
 
 
 @pytest.mark.backend_unit

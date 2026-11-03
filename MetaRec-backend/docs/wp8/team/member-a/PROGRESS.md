@@ -9,9 +9,9 @@ add a log entry (newest first) with every change on a Member A branch. Record on
 
 | # | Milestone | Deliverable | Target | Status | Branch | Evidence |
 |---|---|---|---|---|---|---|
-| M1 | Topology registry | D1 | 8 Nov | ✅ | merged to shared | `tests/test_wp8_topology.py` (25 tests) |
-| M2 | Event contract (`GraphRunEventV1`) | D1 | 8 Nov | 🟡 | merged to shared | `tests/test_wp8_event_contract.py` (108 tests), `tests/test_wp8_golden_events.py` (36 tests); waiting on B for H1–H3 and R1–R10 in `DECISIONS.md` |
-| M3 | Single-invocation helper | D2 | 15 Nov | ✅ | `wp8/a-m3-invocation-helper` | `tests/test_wp8_invocation.py` (17 tests) |
+| M1 | Topology registry | D1 | 8 Nov | ✅ | merged to shared | `tests/test_wp8_topology.py` (26 tests) |
+| M2 | Event contract (`GraphRunEventV1`) | D1 | 8 Nov | 🟡 | merged to shared | `tests/test_wp8_event_contract.py` (120 tests), `tests/test_wp8_golden_events.py` (40 tests); waiting on B for H1–H3, H7 and R1–R15 in `DECISIONS.md` |
+| M3 | Single-invocation helper | D2 | 15 Nov | ✅ | `wp8/a-m3-invocation-helper` | `tests/test_wp8_invocation.py` (26 tests) |
 | M4 | Runner plumbing + guard test | D2 | 22 Nov | ⬜ | — | — |
 | M5 | Callback collector | D2 | 29 Nov | ⬜ | — | — |
 | M6 | Task hand-off + trace completion | D2 | 6 Dec | ⬜ | — | — |
@@ -20,15 +20,52 @@ add a log entry (newest first) with every change on a Member A branch. Record on
 | M9 | Trace client + polling hook | D4 | 20 Dec | ⬜ | — | — |
 | M10 | DAG | D4 | 7 Feb | ⬜ | — | — |
 | M11 | Timeline + selection sync | D4 | 21 Feb | ⬜ | — | — |
-| M12 | Fidelity + overhead evidence | D5 | 7 Mar | ⬜ | — | — |
+| M12 | Fidelity + overhead evidence | D6 (D5 phase) | 7 Mar | ⬜ | — | — |
 | M13 | Handover | D6 | 21 Mar | ⬜ | — | — |
 
 ## Open items and decisions
 
 Shared items now live in [../DECISIONS.md](../DECISIONS.md) (hand-offs
-H1–H5, rules R1–R10, decided X1). Member A's side of H4 and H5 is done.
+H1–H8, rules R1–R15, decided X1–X3). Member A's side of H4 and H5 is done;
+H6 is planned for M4.
 
 ## Log
+
+### 2026-11-03 — Review fixes before M4 (shared branch + M3)
+
+Review of M1–M3 against the brief found four defects and three plan gaps.
+
+- **Shared branch (`WP8-LangGraph-Recommendation-Trace`):**
+  - `models.py`: graph-level `error` must have `node_id: null`; numbers and
+    booleans strict (`"17"`/`true` no longer coerced, matching the schema);
+    `GraphInstance` IDs use the event safe-ID pattern and `ended_sequence`
+    cannot precede `started_sequence`. Schemas regenerated (DECISIONS X2, X3).
+  - `topology.py`: `builder_structure()` fast path for `matches_registered()`
+    (~0.008 ms vs ~0.48 ms per traced call), falling back to full extraction
+    when the builder differs or is unreadable.
+  - Golden lists: new `full_debug_run` (E3 turns 1+2 in one trace, two turn
+    roots); every manifest gains `source.root_turns` and `turn_roots`; the
+    one-root check is now one root per turn (R11).
+  - `DECISIONS.md`: R11 (one trace per debug run, finish condition), R12
+    (orphans withheld and counted, trace `incomplete`; R5 unchanged), R13
+    (what explicit propagation means), R14 (AST guard test scope), R15
+    (untraceable graph runs once untraced), H6 (A: `trace_ctx` on
+    `handle_user_request_async`), H7 (B: route passes and seals the trace),
+    H8 (WP5/WP7 not in repo; M7 on fake events), X2, X3.
+  - `ROADMAP.md` M2/M4–M8/M12, `MEMBER_A.md`, `MEMBER_B.md`, `FRAMEWORK.md`
+    and the golden README updated to match.
+- **M3 branch:** `invocation.py` no longer raises on an unregistered ID or a
+  topology mismatch: it runs the graph once untraced, logs, and calls the
+  collector's optional `on_untraced_graph()` (R15); `TopologyMismatchError`
+  removed. An explicit hand-off parent is now applied to a callback manager
+  and when the collector is already present (it was silently dropped in
+  both). Tests: 26 (+9) — hand-off parent for five callback forms, copied
+  context with hand-off, untraceable graphs run once and are reported, a
+  collector without or with a failing report hook does not break the run.
+- **Verified:** shared branch alone 796 passed, 14 skipped; M3 branch alone
+  805 passed, 14 skipped; both combined (the state after merging the shared
+  branch into M3) 822 passed, 14 skipped, of which 224 are WP8 tests. The
+  two change sets apply together with no conflicts.
 
 ### 2026-10-29 — M3 single-invocation helper
 
