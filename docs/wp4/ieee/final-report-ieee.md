@@ -730,7 +730,7 @@ I then reviewed D4 line by line against the proposal's text. That found four thi
 
 The offline result (+0.81% NDCG@10 over B1) was measured on the Amazon Reviews data with a history query. It does not carry over to live requests, which have a real query, a different popularity scale and no relevance labels. For live requests the evidence is the 15 labelled searches ({sec:evalresults}), the contract checks and the equality with B0 when the flag is off. Five limits are known. First, the hard category, model and required-word rules are matched against the candidate's text (title, description, tags and the provider's brand field), because live candidates carry no verified category or model field. The proposal asks that unverified text not be promoted to a hard-filter field, so this departs from it. A product whose title leaves out a word it really has is excluded, and a brand rule fires only when a different brand is readable. Only the budget rests on a parsed field, the price. The proposal's third identity rule, a normalised brand and model when there is no ASIN, is not built, because the provider results carry no model field. The live weights are the offline ones. The repository returns at most 5,000 interactions, oldest first, so a user with more than that loses the latest ones. And no live check with a SerpApi key has been run.
 
-To show it in the demo, set `METAREC_PRODUCT_RANKER=domain_v1` (or `legacy` for the other half), restart the backend, and run the same ProductRec query twice.
+To record the demo, set `METAREC_PRODUCT_RANKER=domain_v1` (or `legacy` for the other half), restart the backend, and run the same ProductRec query once with each setting.
 
 ## The One-Command Evaluation (D5) {#eval}
 
@@ -920,7 +920,7 @@ Hou et al. {cite:1} is the source of the dataset. The proposal lists the pretrai
 - Prices and providers. Prices and result lists change between runs ({sec:prices}), so the live result will differ from any frozen one. The live path has been tested against frozen candidate pools and not against the real provider.
 - Rules on text. The hard rules match candidate text and not validated attributes ({sec:livelimits}). The zero-violator result on the 15 searches therefore says that the rules do what they state. It does not say that every product that passes truly has the required feature.
 - Collaborative baselines. Only ItemKNN was tried ({sec:related}).
-- Hardware. The latency was measured on one laptop, and the live-ranker p95 moved between 3.5 and 15.4 ms across repeats. It should be repeated on the demo machine if that is a different one.
+- Hardware. The latency was measured on one laptop, and the live-ranker p95 moved between 3.5 and 15.4 ms across repeats. It should be repeated if the ranker runs on a different machine.
 - The test split. I scored it once, so the +1.87% there is a single run. It carries the same offline limits as the development set (sampled metrics, a history as the query, random negatives), and it cannot say anything about real queries.
 
 ## Conclusion {#conclusion}
@@ -942,7 +942,7 @@ The Project Plan (§6) records the decisions below, which come from the project 
 5. Missing or unparseable price: unknown, never zero. It is excluded when the request has a budget (reason code `UNKNOWN_PRICE_STRICT_MODE`) and kept and flagged when it does not. The parser is done ({sec:dataset}), and the policy and the reason code are implemented and tested in the M2 module ({sec:finishing}). D4 wired the policy into the live path ({sec:live}).
 6. Currency: USD for the offline evaluator, since the dataset is priced in USD. Done.
 7. ASIN identity: in scope, as an additive change to the adapter. With the flag off the output must stay identical to B0, which a fixture test proves. The golden fixture tests exist ({sec:b0repro}), and D4 built the ASIN change in the live adapter ({sec:live}).
-8. Latency: ranker-only p95 of at most 25 ms for 100 candidates on declared hardware. This is met on my laptop, where the p95 of M2 was 11 to 19 ms in 13 runs on a busy machine ({sec:retune}) and 9.3 ms in the D5 run ({sec:evalresults}). It should be repeated if the demo runs on a different machine.
+8. Latency: ranker-only p95 of at most 25 ms for 100 candidates on declared hardware. This is met on my laptop, where the p95 of M2 was 11 to 19 ms in 13 runs on a busy machine ({sec:retune}) and 9.3 ms in the D5 run ({sec:evalresults}). It should be repeated if the ranker runs on a different machine.
 9. B1: BM25 plus calibrated popularity is enough, and ItemKNN is added only if D1 shows that the interaction data supports it. Checked, and it does ({sec:leak}, item 3).
 10. NDCG relevance: graded labels from the review rating (5 stars = 2, 4 stars = 1, below 4 = 0), written into D0. I apply them in {sec:legacy} as NDCG normalised by the ideal ranking, which with one rated item per case reduces to binary NDCG with grade-0 cases scored 0. Both versions are reported (see {sec:own}).
 11. Head and tail: the top 20% of items by review count within the frozen category are head and the rest are tail, and any documented threshold is acceptable if it is fixed before evaluation. I fixed it at 12 train reviews (see {sec:own}). The earlier 868, from the metadata counts, includes future reviews and is not used.
@@ -1000,8 +1000,8 @@ The D5 command writes `report.md`, `report.json`, `per_case.csv` and `per_case.n
 
 The project is built, tested and evaluated on development data. This is what is left.
 
-1. A check against the real provider. Run the live smoke test (`--live-smoke`) and the demo with a SerpApi key and quota, which is the second open point in {sec:confirm}.
-2. The oral, 23 to 28 November: slides first, then a live demo in the UI with the ranker flag off and on ({sec:livelimits} says how), with a frozen replay as backup.
+1. A check against the real provider. Run the live smoke test (`--live-smoke`) with a SerpApi key and quota. The key has a quota cap, so I keep its use to the smoke test and to recording the demo.
+2. The oral, 23 to 28 November: slides first, then a short recorded demo of the same search with the ranker flag off and on ({sec:livelimits} says how). A live run is optional. The frozen search in {tab:t35} is the backup.
 3. Work that I would do next, in order of value: collect real search queries and live relevance labels, so that the weights can be tuned on the live task and the complex-query slice can use real queries; pin an exchange-rate table; build the brand-and-model identity rule; and try BPR or EASE as stronger collaborative baselines.
 
 ### Decisions Taken on My Own Judgement {#own}
@@ -1017,7 +1017,7 @@ The Plan or the proposal left these points open. I have decided each one here an
 | **What the test run skipped** | Latency, the labelled searches and the acceptance tests were not repeated, and graded NDCG is not reported. | None of them depends on the split, and the ratings of the test rows were never read. | {secn:testsplit} |
 | **The 3% target** | The frozen threshold is not changed. The overall result (+0.81% on the development set, +1.87% on the test split) is reported as it is, with the ablations and the slice result beside it. | Thresholds are frozen once the locked test is opened, and the evidence shows where the gain is and is not. | {secn:retune}, {secn:slices} |
 | **Graded NDCG** | Both versions are reported: binary, and graded (normalised by the ideal ranking). | With one rated item per case, the difference between a 5-star and a 4-star item cancels in the normalised version. | {secn:legacy} |
-| **Demo** | Slides first, then a live demo in the UI with the ranker flag off and on, with a frozen replay as backup. | Live search results change from run to run. | {secn:status}, remaining work |
+| **Demo** | Slides first, then a recorded demo of the ranker flag off and on (one or two representative workflows); a live run is optional. | A recording shows a working prototype and does not depend on the network, and live search results change from run to run. | {secn:status}, remaining work |
 | **Hard rules match candidate text** | Category, model and required-word rules are matched against the title, description, tags and the provider's brand field, and a brand rule fires only when a different brand is readable. | Live candidates have no verified category or model field. This departs from the proposal's wish for validated fields only, and it is the conservative option that the data allows. | {secn:livelimits} |
 | **Branch name** | Keep `feat/wp4-constraint-aware-product` on the fork, with draft pull request #17. | The project lead allowed a fork with a work-in-progress pull request. | {secn:decisions}, point 4 |
 | **A bare `$` in a live budget** | Read as USD. | SerpApi's Amazon results are in USD, although the app treats `$` as SGD elsewhere. A price in another currency than the budget is excluded, because no exchange table is pinned. | {secn:livebehaviour}, item 5 |
@@ -1027,11 +1027,10 @@ The Plan or the proposal left these points open. I have decided each one here an
 
 ### Still to Confirm With the Supervisor {#confirm}
 
-Three points are still open for the supervisor.
+Two points are still open for the supervisor.
 
 1. Licence. Neither the dataset's homepage nor its Hugging Face card states a licence or terms of use, only a request to cite (checked 20 and 21 Oct). Is academic use on that basis acceptable?
-2. Demo key. If a live demo is expected, who provides the SerpApi key and quota?
-3. Ethics. I collected no consent, and none could be collected: the data is a public research dataset of reviews, and I recruit and contact nobody and do not try to identify any reviewer. I have not asked for a formal ethics determination. Does the university need one for the secondary use of public, pseudonymous data?
+2. Ethics. I collected no consent, and none could be collected: the data is a public research dataset of reviews, and I recruit and contact nobody and do not try to identify any reviewer. I have not asked for a formal ethics determination. Does the university need one for the secondary use of public, pseudonymous data?
 
 %references
 
