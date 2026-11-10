@@ -206,7 +206,8 @@ The proposal asks for frozen provider-style candidates. There are two sets.
 - **A known limit.** Negatives are drawn from the whole catalogue, which includes the 32,289
   items with no train rows (first reviewed after the train cutoff). A candidate can
   therefore be an item that had no reviews yet at the time of the case.
-- No test-split pools have been built; they are made only when the test is opened.
+- Test-split pools were built on 9 Nov 2026, when the test split was opened for the final run (443,817 cases,
+  `eval/product_test_v1.jsonl`, same builder and seed 42; history and past are train plus dev). Not committed (large).
 
 ## Data handling
 
@@ -229,7 +230,8 @@ The proposal asks for frozen provider-style candidates. There are two sets.
   every copy the project holds; there is no copy elsewhere.
 - **Locked-test custody.** `split/test.tsv` (443,817 rows, the last 10% of the timeline;
   SHA-256 `79eaf5ff4443aed555e9969b59cc8853b7ea377eb9f48a26eb18645753e79c0c`) is not used to
-  score, tune or inspect any system. It is opened once, at the end, for the final numbers.
+  score, tune or inspect any system. It was opened once, on 9 Nov 2026, for the final numbers; no weight or
+  threshold was changed afterwards.
   Two reads happen that use no test outcome: building dev cases reads it to exclude a user's
   later items from that user's negatives, and the ratings stages skip its rows. The
   checksum makes any later change detectable.

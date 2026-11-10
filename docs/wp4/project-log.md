@@ -27,8 +27,11 @@ D4 live integration behind the flag ([`D4-integration.md`](D4-integration.md)) a
 one-command evaluation ([`D5-evaluation.md`](D5-evaluation.md)). Dev-set result (held-out users): M2 over
 B1 NDCG@10 +0.81% (95% interval +0.69% to +0.94%), so the 3% minimum effect is **not met**; complex-query
 slice +2.91%; 0 of 52 labelled violators surfaced (B0 52 of 52); ranker p95 about 9 ms for 100 candidates.
-Still to do: the sealed test split (one run, at the very end, weights unchanged), a live SerpApi smoke
-test (needs a key), the Final Report (16 Nov) and the demo. The sections below are the dated log of the
+**Update, 10 Nov 2026:** re-tuned component ablation and per-variant exposure done on the dev set
+(`artifacts/wp4_ablation/`; no component hurts accuracy; the tail adjustment is accuracy-neutral but keeps
+catalogue coverage at 70.3% instead of 62.4%). The sealed test split was then scored once with the weights
+unchanged: M2 over B1 NDCG@10 +1.87% [+1.70%, +2.04%], 3% still not met (`artifacts/wp4_d5_test/`).
+Still to do: a live SerpApi smoke test (needs a key), the Final Report (16 Nov) and the demo. The sections below are the dated log of the
 D0 and D3-part-1 work and are kept as written, so their "next steps" lists are history, not the plan.
 
 ## Baseline

@@ -51,6 +51,16 @@ A fixture whose name marks it as the test split is refused unless `--open-test-s
 exists for one run at the very end, with the weights as they stand and no further tuning. On the test split
 the past is train plus dev, and every user is scored (nothing was tuned on it).
 
+**It was run once, on 9 Nov 2026, from commit `789f059`, with the weights unchanged** (report and per-case
+artifacts in `artifacts/wp4_d5_test/`; latency, the labelled searches and the acceptance tests were skipped
+because they do not depend on the split). 443,817 cases, 117,207 users. M2 over B1, NDCG@10 **+1.87%
+[+1.70%, +2.04%]**; Recall@10 +1.27%, MRR@10 +2.22%. The 3% minimum effect is still **not met** and the 5%
+directional line is not reached. Complex slice +3.20% [+2.95%, +3.46%]; warm +2.29%; keyword-like +0.21%
+(interval includes 0); cold +0.01% (same as B1 by construction); head -1.33%; tail +72.26%. Exposure: head
+share of the top 10 89.9% (B1 94.5%), catalogue coverage 78.0% (B1 67.1%). Differences from the dev run: the head
+cut-off is recomputed from train plus dev (18 reviews, not 12) and graded NDCG is not reported (test ratings
+were never read). Absolute scores are lower than on dev (M2 NDCG@10 0.1739 vs 0.2369), so compare lifts, not levels.
+
 ## Result on the development set (held-out users, 479,889 cases, 134,481 users)
 
 | System | Recall@10 | NDCG@10 | MRR@10 |
@@ -75,7 +85,7 @@ the past is train plus dev, and every user is scored (nothing was tuned on it).
   live-ranker figure is noisy: five other measurements gave 3.5 to 15.4 ms. All are under the 25 ms target.
 * **Acceptance tests:** the four pytest files pass (153 tests).
 * **Not run against the real provider:** the live smoke test (no key given). Its code path is exercised in
-  the tests against a stub provider, so it will not fail on a typo at the demo. The sealed test split is untouched.
+  the tests against a stub provider, so it will not fail on a typo at the demo. The sealed test split was scored once, at the end (see above).
 
 Reading a negative result honestly: the offline cases have no stated budget, brand or model, so the part of M2
 that is new (the hard constraints) cannot show up in the accuracy numbers; it shows up in §6. The accuracy gain

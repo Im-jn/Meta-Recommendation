@@ -8,13 +8,13 @@
 %affil Proposal: github.com/Hanny658/FYP26-Proposals, folder [taken] WP4-product-recommendation
 %affil Code: MetaRec, branch `feat/wp4-constraint-aware-product`
 
-%abstract WP4 aims to make the product recommendations in MetaRec respect what the user asked for (budget, brand, category and compatibility) and to rank the products that remain by relevance. This report covers the whole project: an audit of the current pipeline, the frozen evaluation data, the baselines, a constraint-aware ranker (M2), its integration into the live request path behind a feature flag, and a one-command evaluation. In the audit, 52 of the 146 products returned by 15 frozen searches broke a stated constraint, and the existing rating-first sort surfaced every one of them. The evaluation data is a time-split subset of Amazon Reviews 2023 with 1,888,667 interactions on 80,181 items. Along the way I found that future reviews were leaking into item popularity. Removing the leak brought the B1 baseline down from a Recall@10 of 0.5140 to 0.3711. On held-out users M2 beats B1 by +0.81% NDCG@10 (95% interval +0.69% to +0.94%), which is short of the 3% target, and by +2.91% for users with long histories. With the flag on, none of the 52 violators reaches the user, and the ranker-only p95 latency for 100 candidates is under 11 ms, against a 25 ms limit. With the flag off, the output is identical to the old ranking. The sealed test split has not been opened.
+%abstract WP4 aims to make the product recommendations in MetaRec respect what the user asked for (budget, brand, category and compatibility) and to rank the products that remain by relevance. This report covers the whole project: an audit of the current pipeline, the frozen evaluation data, the baselines, a constraint-aware ranker (M2), its integration into the live request path behind a feature flag, and a one-command evaluation. In the audit, 52 of the 146 products returned by 15 frozen searches broke a stated constraint, and the existing rating-first sort surfaced every one of them. The evaluation data is a time-split subset of Amazon Reviews 2023 with 1,888,667 interactions on 80,181 items. Along the way I found that future reviews were leaking into item popularity. Removing the leak brought the B1 baseline down from a Recall@10 of 0.5140 to 0.3711. On held-out users M2 beats B1 by +0.81% NDCG@10 (95% interval +0.69% to +0.94%), which is short of the 3% target, and by +2.91% for users with long histories. With the flag on, none of the 52 violators reaches the user, and the ranker-only p95 latency for 100 candidates is under 11 ms, against a 25 ms limit. With the flag off, the output is identical to the old ranking. Taking each component out in turn and re-tuning the rest shows that none of them hurts accuracy. I opened the sealed test split once, at the end, with the weights unchanged. There M2 beats B1 by +1.87% NDCG@10 (95% interval +1.70% to +2.04%), so the gain holds on unseen data, but the 3% target is still not met.
 
 %keywords recommender systems, hard constraints, product search, BM25, item-based collaborative filtering, offline evaluation, Amazon Reviews 2023
 
 ## Introduction {#intro}
 
-The aim of WP4 is simple to state. When a user asks for a product, the recommendations should respect what they asked for, such as budget, brand, category and compatibility, and the products that pass should then be ranked by relevance. The ranker I built for this is called M2. Offline, it has to beat the current sort (B0) and a text-plus-popularity baseline (B1), with a point estimate of at least 3% relative NDCG@10 (Project Plan §6). With its feature flag off, the live output has to stay identical to B0. The evidence comes from a frozen Amazon Reviews 2023 dataset {cite:1}, a development split that I use for tuning, and a sealed test split that is still closed ({sec:testsplit}).
+The aim of WP4 is simple to state. When a user asks for a product, the recommendations should respect what they asked for, such as budget, brand, category and compatibility, and the products that pass should then be ranked by relevance. The ranker I built for this is called M2. Offline, it has to beat the current sort (B0) and a text-plus-popularity baseline (B1), with a point estimate of at least 3% relative NDCG@10 (Project Plan §6). With its feature flag off, the live output has to stay identical to B0. The evidence comes from a frozen Amazon Reviews 2023 dataset {cite:1}, a development split that I use for tuning, and a sealed test split that I opened once, at the end ({sec:testsplit}).
 
 The research question in the proposal is whether a constraint-first hybrid of complex-query text relevance, user affinity and calibrated popularity can rerank MetaRec's existing product candidates better than the generic ranker, without violating an explicit budget, brand, category or model requirement. The project ranks frozen candidates and plugs in after the existing normalisation. It does not replace the Amazon or SerpApi retrieval, crawl products, predict prices, change the routing or the itinerary logic, or make up product attributes that the provider did not supply. One frozen Amazon Reviews 2023 category is enough for the offline study, and I use `Office_Products` ({sec:dataset}).
 
@@ -33,7 +33,8 @@ The research question in the proposal is whether a constraint-first hybrid of co
 | M2 speed | Ranker-only p95 10.9 to 18.9 ms over 13 runs while the laptop was busy ({sec:retune}), and 9.3 ms in the final evaluation; limit 25 ms | {sec:retune}, {sec:evalresults} |
 | M2 in the live request path | With the flag off, the output equals the frozen B0 files. With it on, 0 of 52 violators are shown (B0: 52 of 52) and searches with a violator in the top 3 fall from 9 of 15 to 0. The ASIN becomes the id, and any failure falls back to the B0 order behind the hard gate | {sec:live} |
 | One-command evaluation | One command scores B0, B1, ItemKNN and M2 on all 534,128 cases and checks the proposal's acceptance bullets; all pass except the 3% minimum effect | {sec:eval} |
-| Test split | Sealed, not scored | {sec:testsplit} |
+| Each M2 component removed, the rest re-tuned | None hurts accuracy. Without `collaborative`, M2 falls level with B1 (-0.02%). Without `tail_adjustment`, accuracy is unchanged (-0.05%, interval includes 0) but catalogue coverage drops from 70.3% to 62.4% | {sec:ablation} |
+| Sealed test split (opened once, weights unchanged) | M2 against B1, NDCG@10 +1.87% (95% interval +1.70% to +2.04%); +3.20% on long histories; the 3% target is **not** met | {sec:testsplit} |
 
 Sections {secn:pipeline} to {secn:freeze} give the full D0 audit. After that come the frozen dataset (D1, {sec:dataset}), the baselines (D2, {sec:baselines}), the M2 ranker (D3, {sec:m2}), its integration into the live path (D4, {sec:live}) and the one-command evaluation (D5, {sec:eval}). {sec:discussion} and {sec:conclusion} say what the results mean, and {sec:status} lists the decisions, the limits and what is left. The proposal defines the D0 scope as: *trace router → product tool parameters → providers/enrichment → normalisation/deduplication → generic rank → strict API/UI; reproduce B0; audit item feedback, IDs, prices and missing fields; freeze contracts, dataset/category, split and constraint fixtures.* {tab:t02} shows where each deliverable stands.
 
@@ -45,7 +46,7 @@ Sections {secn:pipeline} to {secn:freeze} give the full D0 audit. After that com
 | D2 baselines | **Done** on development data. A popularity leak was found and the numbers were re-run; confidence intervals, the weight sweep and the leak-free legacy B0 were added ({sec:baselines}) | {sec:baselines}; `scripts/wp4_build_eval_cases.py`, `scripts/wp4_run_baselines.py`, `scripts/wp4_sweep_ranks.py` |
 | D3 M2 ranker | **Done**: built, re-tuned with train-only popularity, tested (63 WP4 tests pass), ranker-only p95 11 to 19 ms against the 25 ms limit. On held-out users M2 beats B1 by +0.81% NDCG@10 (95% interval +0.69% to +0.94%), short of the 3% target, but by +2.91% on the long-history slice ({sec:slices}) | {sec:m2}; `langgraph_metarec/product_ranker_m2.py`, `scripts/wp4_m2_*.py` |
 | D4 integration | **Done**: M2 runs in the live product path behind `METAREC_PRODUCT_RANKER` (flag off equals B0), with typed contracts, ASIN ids, a safe fallback and 95 network-free tests. Not yet tried against the real provider, because that needs a SerpApi key | {sec:live}; `langgraph_metarec/product_ranker_live.py` |
-| D5 evaluation | **Done on development data**: one command, per-case artifacts, user-level bootstrap intervals, slices, exposure, latency and an acceptance table. The live smoke test is built and tested against a stub but has not run against the real provider, and the sealed test split has not been scored | {sec:eval}; `eval/domain_ranker.py` |
+| D5 evaluation | **Done** (development data, then the sealed test split once): one command, per-case artifacts, user-level bootstrap intervals, slices, exposure, latency and an acceptance table. The live smoke test is built and tested against a stub but has not run against the real provider, and the sealed test split was scored once, at the end ({sec:testsplit}) | {sec:eval}; `eval/domain_ranker.py` |
 
 ## Pipeline Trace: A Product Request, End to End {#pipeline}
 
@@ -174,7 +175,7 @@ The live re-run showed two more things. Only 12 of 30 items (40%) appeared in bo
 | Split (chronological per the proposal) | **Frozen**: the last 10% of the timeline is the locked test set and the 10% before that is development (80/10/10 by time, not by row count) | `docs/wp4/D1-data-sheet.md` |
 | Graded relevance judgements | **Created for dev**: 5 stars = 2, 4 stars = 1, below 4 = 0, one label per dev row (Project Plan §6); used for the graded NDCG in {sec:legacy} and {sec:retune} | `data/wp4/processed/split/dev_graded_relevance.tsv` |
 | Development eval cases | **Frozen by checksum**: 534,128 cases (about 1 GB), rebuilt from scratch and byte-identical; candidates are stored as ASINs only | `scripts/wp4_build_eval_cases.py`, seed 42, `eval/checksums.sha256` |
-| Test split (443,817 rows) | **Sealed**: not scored, not used to tune anything | `data/wp4/processed/split/test.tsv` |
+| Test split (443,817 rows) | **Scored once**, at the end, with the weights unchanged; not used to tune anything | `data/wp4/processed/split/test.tsv` |
 
 ## The Frozen Dataset (D1) {#dataset}
 
@@ -278,7 +279,7 @@ The leak changes five things.
 
 {tab:t08} is the original run with the leaking popularity, and the right-hand column of {tab:t09} is the corrected run. Everything after this point uses the corrected version unless it says otherwise.
 
-The main tables use binary NDCG, and {sec:legacy} reports graded NDCG from the D1 labels for the systems compared there. Building the dev cases read the test file once, only to make sure that a user's later items are never used as negatives. No test result informed any score or choice, and the sealed test split has not been scored.
+The main tables use binary NDCG, and {sec:legacy} reports graded NDCG from the D1 labels for the systems compared there. Building the dev cases read the test file once, only to make sure that a user's later items are never used as negatives. No test result informed any score or choice before the single final run described in {sec:testsplit}.
 
 ### Worked Example: How B1 Ranks One Case {#workedb1}
 
@@ -624,6 +625,35 @@ As a sensitivity check, not as the headline, I repeated the comparison at the te
 
 M2 helps most where the history gives it something to work with, because its text and collaborative parts need past purchases to compare against. For cold users M2 and B1 are the same by construction, since both rank by popularity. That also explains the small overall figure in {sec:retune}: 39.5% of the held-out cases are cold and a further 30.4% have short histories. The 3% acceptance criterion applies to the overall NDCG@10, and it is still not met. The long-history slice (+2.91%) is supporting evidence about where the gain comes from, not a replacement for the overall result. The numbers come from `python scripts/wp4_slices.py dist`, which prints only the length distribution, followed by `python scripts/wp4_slices.py run <m2_prefix> <sweep_ranks.npz> 51`.
 
+### Taking Each Component Out, With the Rest Re-Tuned {#ablation}
+
+The ablation in {tab:t27} sets one weight to zero and leaves the other weights where they were. That can understate what a component is worth, because the remaining weights might have moved to make up for it. So I repeated the ablation more fairly. For each component I removed it, searched every weighting of the other components (steps of 0.05, summing to 1) on the 1 in 10 tuning users, and scored the best one on the held-out users with the same bootstrap (`scripts/wp4_m2_ablation.py`). The live-weights row reproduces the +0.81% of {tab:t26}, and the zeroed rows reproduce {tab:t27}. {tab:t43} gives the result.
+
+%table t43 | Each Component Removed and the Rest Re-Tuned (Held-Out Users) | f
+| Removed | Best weights (text, attribute, collaborative, popularity, tail) | NDCG@10 | Against M2 | Against B1 |
+|---|---|---|---|---|
+| none (live M2) | 0.25, 0, 0.05, 0.65, 0.05 | 0.2369 | | +0.81% [+0.69%, +0.94%] |
+| `text_relevance` | 0, 0.10, 0.15, 0.75, 0 | 0.2294 | -3.16% [-3.35%, -2.98%] | -2.37% [-2.55%, -2.19%] |
+| `attribute_match` | unchanged (its weight was 0) | 0.2369 | 0.00% | +0.81% [+0.69%, +0.94%] |
+| `collaborative` | 0.25, 0, 0, 0.70, 0.05 | 0.2349 | -0.83% [-0.90%, -0.75%] | -0.02% [-0.12%, +0.09%] |
+| `popularity` | 0.30, 0.05, 0.65, 0, 0 | 0.1209 | -48.96% [-49.40%, -48.52%] | -48.54% [-49.02%, -48.07%] |
+| `tail_adjustment` | 0.25, 0, 0.05, 0.70, 0 | 0.2368 | -0.05% [-0.11%, +0.01%] | +0.77% [+0.66%, +0.87%] |
+
+No component has a negative effect: every removal leaves NDCG@10 equal or lower. Two results go beyond {tab:t27}. Without `collaborative`, M2 is level with B1 (-0.02%, interval -0.12% to +0.09%), so the history-affinity part is what lifts M2 above B1 overall. And without `text_relevance`, M2 falls below B1 (-2.37%). The re-tuned loss for the text part (-3.16%) is smaller than the zeroed one (-4.13%), as expected, but it is still clear. Popularity remains the largest part by far.
+
+The tail adjustment is the interesting case. Removing it costs -0.05% (interval -0.11% to +0.01%), which cannot be told apart from zero, so it adds nothing measurable to accuracy. It does matter for exposure. {tab:t44} shows the head share of the top 10 and the catalogue coverage of each variant on the held-out users (`scripts/wp4_m2_exposure.py`, which reproduces the 91.5% and 70.3% of {tab:t38} for the live weights).
+
+%table t44 | Exposure of Each Variant on the Held-Out Users (Top 10) | f
+| Removed (rest re-tuned) | Head share of the top 10 | Distinct items shown | Catalogue coverage |
+|---|---|---|---|
+| none (live M2) | 91.5% | 56,396 | 70.3% |
+| `text_relevance` | 97.8% | 40,359 | 50.3% |
+| `collaborative` | 92.6% | 53,534 | 66.8% |
+| `popularity` | 29.3% | 80,181 | 100.0% |
+| `tail_adjustment` | 94.9% | 50,046 | 62.4% |
+
+Without the tail adjustment the head share rises from 91.5% to 94.9% and the coverage falls from 70.3% to 62.4%, so it is what keeps M2 from showing the same few items to everyone. On the complex slice it is worth 0.8 points (+2.09% against B1 instead of +2.91%). I therefore kept it. Removing popularity gives full coverage, but it halves accuracy, so that is not a useful trade. The live weights did not change as a result of this ablation.
+
 ### Finishing D3: Eligibility First, the Missing-Price Policy, the Fallback, and Tests {#finishing}
 
 D3 asks for a hard-constraint engine, the hybrid score, a cold fallback, reason codes and ablations. I built the score, the cold fallback, the reason codes and the ablations earlier. This step added what was still missing and tested all of it (`langgraph_metarec/product_ranker_m2.py`, `tests/wp4/test_product_ranker_m2.py`). It has five parts.
@@ -813,7 +843,34 @@ The evaluator has 44 tests that need neither the data file nor the network. They
 
 ### The Sealed Test Split {#testsplit}
 
-I have not opened the test split, which holds 443,817 rows. The plan is to open it once, at the very end, with the weights and thresholds as they stand and no further tuning. The evaluator refuses a test fixture without an explicit flag, and on that split the past is train plus dev and every user is scored, because nothing was tuned on it. Since the development result already misses the 3% target, I do not expect the test split to change the conclusion, and opening it cannot be undone. The figures in this report are therefore development-set results, and they are the point estimate that I report.
+On 9 November 2026, once the development work and the ablation were finished, I ran the evaluation on the test split once, with the weights, the thresholds and the code as they stood (commit `789f059`). I had not looked at any test result before that run, and I changed nothing afterwards. The evaluator needs an explicit flag for this (`--open-test-split`). On the test split the past is train plus dev, every user is scored because nothing was tuned on it, and the cases are built the same way as the development cases: 100 candidates with seed 42, and the user's last 20 purchases as the query. The split has 443,817 cases from 117,207 users, and 31.0% of the cases have no history. Two things differ from the development run. The head cut-off is recomputed from train plus dev counts, and it comes out at 18 reviews instead of 12. And graded NDCG is not reported, because I never read the ratings of the test rows. I skipped the latency measurement, the labelled searches and the acceptance tests, since none of them depends on the split. {tab:t41} gives the main result.
+
+%table t41 | Systems on the Sealed Test Split (443,817 Cases) | f
+| System | Recall@10 | NDCG@10 | MRR@10 |
+|---|---|---|---|
+| B0, legacy order with train-only ratings | 0.0436 | 0.0278 | 0.0230 |
+| B0, reviews only | 0.2523 | 0.1531 | 0.1227 |
+| ItemKNN | 0.1945 | 0.1120 | 0.0869 |
+| B1, BM25 weight 0.25 | 0.2755 | 0.1707 | 0.1385 |
+| **M2** | **0.2790** | **0.1739** | **0.1416** |
+
+M2 beats B1 by +1.87% in NDCG@10 (95% interval +1.70% to +2.04%), by +1.27% in Recall@10 (+1.09% to +1.46%) and by +2.22% in MRR@10 (+2.01% to +2.44%). The lower bound is above zero, so that criterion passes, and the point estimate is larger than on the development set (+0.81%). It is still below the 3% target and below the 5% directional line, so the 3% criterion fails on the test split as well. The absolute scores are lower than on the development set (NDCG@10 0.1739 for M2 against 0.2369), so the two sets are not directly comparable, and I did not look into why. Only the relative lifts are comparable. {tab:t42} gives them by slice.
+
+%table t42 | Lift of M2 Over B1 on the Test Split, by Slice | f
+| Slice | Cases | NDCG@10 lift (95% interval) |
+|---|---|---|
+| All cases | 443,817 | +1.87% [+1.70%, +2.04%] |
+| Cold (no history) | 137,595 | +0.01% [-0.01%, +0.04%] |
+| Warm (has history) | 306,222 | +2.29% [+2.09%, +2.50%] |
+| Keyword-like (1 to 51 words) | 107,349 | +0.21% [-0.16%, +0.57%] |
+| **Complex (more than 51 words)** | 198,873 | **+3.20% [+2.95%, +3.46%]** |
+| Head target (18+ train reviews) | 151,526 | -1.33% [-1.46%, -1.20%] |
+| Tail target (under 18) | 292,291 | +72.26% [+69.75%, +74.75%] |
+| Target price missing | 53,204 | +6.75% [+5.97%, +7.54%] |
+
+The pattern is the one from the development set. The edge grows with the length of the history (+0.21% on short histories, +2.29% on warm users, +3.20% on long ones), M2 gives up 1.33% on head targets and gains a great deal on tail targets, and cold users get the same result as B1 by construction. On exposure, M2's top 10 holds 89.9% head items against 94.5% for B1, and it shows 62,541 distinct items, a catalogue coverage of 78.0% against 67.1% for B1.
+
+This is one run on one test split, with the same offline limits as before: sampled metrics, a history as the query, random negatives. It supports the claim that the gain is not an artefact of tuning on the development set. It does not show how M2 behaves on real queries. I report this number, together with the development result, as the point estimate of the project.
 
 ## Discussion {#discussion}
 
@@ -826,6 +883,8 @@ First, popularity does almost all of the work. A reviews-only sort already reach
 That is also the honest summary of the contribution. On accuracy against a strong popularity baseline the gain is small. On the property that motivated the project, products that break the user's own constraints, the change is large and easy to see: with the old sort every one of the 52 violators was shown, and in 9 of 15 searches one was in the top 3. The price of strictness is small and visible. Three compliant products with no price were excluded because a budget was stated, and a user who wants unpriced products would have to drop the budget.
 
 The head and tail result is a trade-off and not a clear win. M2 is 1.29% worse than B1 on head targets and much better on tail ones, with more of the catalogue shown. Whether that is wanted depends on the product. For a search with a budget it probably is, because the item the user wants is often not the most reviewed one, but I have no live data to say so.
+
+The sealed test split supports this reading. M2's lead over B1 is +1.87% there (+1.70% to +2.04%), larger than on the development set and with the same pattern across slices, so the gain is not an artefact of tuning on the development set ({sec:testsplit}). The 3% target is still not met. Taking each component out in turn ({sec:ablation}) shows that none hurts accuracy, that the history-affinity part is what puts M2 above B1, and that the tail adjustment earns its place through exposure and not through accuracy.
 
 ### Where M2 Still Falls Short {#failures}
 
@@ -862,13 +921,13 @@ Hou et al. {cite:1} is the source of the dataset. The proposal lists the pretrai
 - Rules on text. The hard rules match candidate text and not validated attributes ({sec:livelimits}). The zero-violator result on the 15 searches therefore says that the rules do what they state. It does not say that every product that passes truly has the required feature.
 - Collaborative baselines. Only ItemKNN was tried ({sec:related}).
 - Hardware. The latency was measured on one laptop, and the live-ranker p95 moved between 3.5 and 15.4 ms across repeats. It should be repeated on the demo machine if that is a different one.
-- The test split. It has not been scored, so nothing here has been checked on data that played no part in any choice, apart from the held-out users of the development split.
+- The test split. I scored it once, so the +1.87% there is a single run. It carries the same offline limits as the development set (sampled metrics, a history as the query, random negatives), and it cannot say anything about real queries.
 
 ## Conclusion {#conclusion}
 
 WP4 set out to stop MetaRec from recommending products that break what the user asked for, and to rank the rest well. The audit showed the size of the problem: 36% of the products returned by 15 frozen searches broke a stated constraint, and the existing rating-first sort showed all of them. I built a frozen, leak-free evaluation on Amazon Reviews 2023, found and removed a popularity leak that had nearly doubled the first baseline numbers, and built a constraint-first hybrid ranker, M2. It is now connected to the live product path behind a feature flag. With the flag off, the output is unchanged. With the flag on, no violator reaches the user in any of the 15 searches, a failure falls back to the old order behind the same gate, and the ranker takes well under the 25 ms limit for 100 candidates.
 
-On ranking quality the result is modest. M2 beats B1 by +0.81% NDCG@10 on held-out users, with an interval of +0.69% to +0.94%, and by +2.91% on long histories, so the 3% target is not met. I did not change the threshold, and the test split is unopened. What the project delivers is a ranker that never ignores a stated budget, brand, category or model, a way to measure it with one command, and an honest account of how small the accuracy gain is against a strong popularity baseline. To answer the research question directly: yes, a constraint-first hybrid can rerank MetaRec's product candidates without violating a stated budget, brand, category or model, and the 15 searches show it (0 of 52 violators). It ranks better than the old rating-first order by a wide margin (NDCG@10 0.2369 against 0.0347 for the closest leak-free version of that order), and better than a text-plus-popularity baseline only slightly, which is not enough to meet the 3% target. Real search queries, live relevance labels and a pinned exchange table are what would show whether the gain is larger in use than it is offline.
+On ranking quality the result is modest. M2 beats B1 by +0.81% NDCG@10 on held-out users, with an interval of +0.69% to +0.94%, and by +2.91% on long histories. On the sealed test split, scored once at the end, the lead is +1.87% (+1.70% to +2.04%). The 3% target is not met on either set, and I did not change the threshold. What the project delivers is a ranker that never ignores a stated budget, brand, category or model, a way to measure it with one command, and an honest account of how small the accuracy gain is against a strong popularity baseline. To answer the research question directly: yes, a constraint-first hybrid can rerank MetaRec's product candidates without violating a stated budget, brand, category or model, and the 15 searches show it (0 of 52 violators). It ranks better than the old rating-first order by a wide margin (NDCG@10 0.2369 against 0.0347 for the closest leak-free version of that order), and better than a text-plus-popularity baseline only slightly, which is not enough to meet the 3% target. Real search queries, live relevance labels and a pinned exchange table are what would show whether the gain is larger in use than it is offline.
 
 ## Status, Decisions and Handover {#status}
 
@@ -877,7 +936,7 @@ On ranking quality the result is modest. M2 beats B1 by +0.81% NDCG@10 on held-o
 The Project Plan (§6) records the decisions below, which come from the project lead's twelve points and one correction. For each one I give its status here. None has been confirmed by the supervisor yet.
 
 1. Dataset and cutoff: one mid-size category (not Electronics), 5-core filtered and frozen with checksums, with a chronological split in which the last 10% of the timeline is the locked test and the 10% before it is development. Done ({sec:dataset}).
-2. Frozen thresholds: a user-bootstrap 95% lower bound above zero, a point estimate of at least 3% relative conditional NDCG@10, and a 2% relative non-inferiority margin for the complex-query slice. Both are frozen and do not move once the locked test is opened. Status: the 3% is not met (+0.81%, {sec:retune}). The complex-query slice uses a history-length proxy, on which M2 is non-inferior to B1 and +2.91% ahead on long histories ({sec:slices}).
+2. Frozen thresholds: a user-bootstrap 95% lower bound above zero, a point estimate of at least 3% relative conditional NDCG@10, and a 2% relative non-inferiority margin for the complex-query slice. Both are frozen and do not move once the locked test is opened. Status: the 3% is not met (+0.81% on the development set, {sec:retune}, and +1.87% on the test split, {sec:testsplit}). The complex-query slice uses a history-length proxy, on which M2 is non-inferior to B1 and +2.91% ahead on long histories ({sec:slices}).
 3. Success for one semester: D0 to D3 complete, M2 integrated behind the flag, and a point-estimate evaluation with zero hard-constraint violations. Status: D0 to D5 are done on development data. M2 is integrated behind the flag ({sec:live}), and zero violations holds on the 15 frozen searches with the live gate ({app:B}), with the gate of M2 ({sec:finishing}) and through the live path ({sec:evalresults}).
 4. Pull requests: a branch on the team repository named like `fyp/wp4/<topic>`, or a fork with a work-in-progress pull request. I work on a fork with draft pull request #17. The branch name differs from the convention (kept, see {sec:own}).
 5. Missing or unparseable price: unknown, never zero. It is excluded when the request has a budget (reason code `UNKNOWN_PRICE_STRICT_MODE`) and kept and flagged when it does not. The parser is done ({sec:dataset}), and the policy and the reason code are implemented and tested in the M2 module ({sec:finishing}). D4 wired the policy into the live path ({sec:live}).
@@ -929,6 +988,10 @@ python -m pytest tests/wp4                                         # 202 tests
 python scripts/wp4_slices.py dist                         # length distribution only
 python scripts/wp4_slices.py run m2full sweep_ranks.npz 51  # slices, a few minutes
 python -m eval.domain_ranker --domain product --fixture eval/product_dev_v1.jsonl --systems generic classical domain_v1 --out artifacts/wp4_d5_dev   # D5, about 25 minutes
+python scripts/wp4_m2_ablation.py m2full artifacts/wp4_d5_dev/per_case.npz artifacts/wp4_ablation          # re-tuned ablation
+python scripts/wp4_m2_exposure.py m2full artifacts/wp4_ablation/ablation.json eval/product_dev_v1.jsonl artifacts/wp4_ablation
+python scripts/wp4_build_eval_cases.py --split test      # only when the test split is opened (once)
+python -m eval.domain_ranker --domain product --fixture eval/product_test_v1.jsonl --systems generic classical domain_v1 --out artifacts/wp4_d5_test --open-test-split --skip-latency --skip-constraints --skip-acceptance-tests
 ```
 
 The D5 command writes `report.md`, `report.json`, `per_case.csv` and `per_case.npz`. The first two are small and are kept in git under `artifacts/wp4_d5_dev/`, and the per-case files are not (they are about 75 MB and rebuild from the fixed fixture). The report of this run names the commit it ran from.
@@ -937,10 +1000,9 @@ The D5 command writes `report.md`, `report.json`, `per_case.csv` and `per_case.n
 
 The project is built, tested and evaluated on development data. This is what is left.
 
-1. The sealed test split. It is to be opened once, at the very end, with the weights and thresholds as they are ({sec:testsplit}).
-2. A check against the real provider. Run the live smoke test (`--live-smoke`) and the demo with a SerpApi key and quota, which is the second open point in {sec:confirm}.
-3. The oral, 23 to 28 November: slides first, then a live demo in the UI with the ranker flag off and on ({sec:livelimits} says how), with a frozen replay as backup.
-4. Work that I would do next, in order of value: collect real search queries and live relevance labels, so that the weights can be tuned on the live task and the complex-query slice can use real queries; pin an exchange-rate table; build the brand-and-model identity rule; and try BPR or EASE as stronger collaborative baselines.
+1. A check against the real provider. Run the live smoke test (`--live-smoke`) and the demo with a SerpApi key and quota, which is the second open point in {sec:confirm}.
+2. The oral, 23 to 28 November: slides first, then a live demo in the UI with the ranker flag off and on ({sec:livelimits} says how), with a frozen replay as backup.
+3. Work that I would do next, in order of value: collect real search queries and live relevance labels, so that the weights can be tuned on the live task and the complex-query slice can use real queries; pin an exchange-rate table; build the brand-and-model identity rule; and try BPR or EASE as stronger collaborative baselines.
 
 ### Decisions Taken on My Own Judgement {#own}
 
@@ -951,7 +1013,9 @@ The Plan or the proposal left these points open. I have decided each one here an
 |---|---|---|---|
 | **Complex-query slice** | A proxy: users with a history are split at the median length of their history text (51 words) into keyword-like and complex, and users with no history are a separate cold slice. | The data has no real search queries. The cut was fixed from the length distribution before any result was seen, and the result holds at other cuts. | {secn:slices} |
 | **Head and tail threshold** | Head = top 20% of items by review count, with the count taken from train only: **12 reviews**. Fixed now, before the final evaluation. | The leak-free runs use train counts. The metadata count (868) includes reviews written after the case. | {secn:retune} |
-| **The 3% target** | The frozen threshold is not changed. The overall result (+0.81%) is reported as it is, with the ablations and the slice result beside it. | Thresholds are frozen once the locked test is opened, and the evidence shows where the gain is and is not. | {secn:retune}, {secn:slices} |
+| **Head cut-off on the test split** | Recomputed from train plus dev counts, as the evaluator does (18 reviews), and not kept at 12. | On the test split the past includes dev, and the cut-off is defined as the top 20% of items by review count in the past. | {secn:testsplit} |
+| **What the test run skipped** | Latency, the labelled searches and the acceptance tests were not repeated, and graded NDCG is not reported. | None of them depends on the split, and the ratings of the test rows were never read. | {secn:testsplit} |
+| **The 3% target** | The frozen threshold is not changed. The overall result (+0.81% on the development set, +1.87% on the test split) is reported as it is, with the ablations and the slice result beside it. | Thresholds are frozen once the locked test is opened, and the evidence shows where the gain is and is not. | {secn:retune}, {secn:slices} |
 | **Graded NDCG** | Both versions are reported: binary, and graded (normalised by the ideal ranking). | With one rated item per case, the difference between a 5-star and a 4-star item cancels in the normalised version. | {secn:legacy} |
 | **Demo** | Slides first, then a live demo in the UI with the ranker flag off and on, with a frozen replay as backup. | Live search results change from run to run. | {secn:status}, remaining work |
 | **Hard rules match candidate text** | Category, model and required-word rules are matched against the title, description, tags and the provider's brand field, and a brand rule fires only when a different brand is readable. | Live candidates have no verified category or model field. This departs from the proposal's wish for validated fields only, and it is the conservative option that the data allows. | {secn:livelimits} |
